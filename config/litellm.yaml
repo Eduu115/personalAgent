@@ -1,0 +1,45 @@
+# LiteLLM: un unico endpoint compatible con OpenAI delante de todos los modelos.
+#
+# Por que existe esta capa aunque hoy solo haya un proveedor:
+#   - tope de gasto mensual duro (el punto mas importante)
+#   - cambiar de modelo o de proveedor es editar este fichero, no el codigo
+#   - contabilidad de coste por alias, para saber que herramienta se come el presupuesto
+#   - cuando llegue Ollama para embeddings, entra aqui sin tocar el agente
+#
+# IMPORTANTE: verifica los identificadores de modelo actuales antes de arrancar,
+# en https://docs.claude.com/en/docs/about-claude/models
+
+model_list:
+
+  # El bucle del agente: razonar, decidir herramienta, encadenar pasos.
+  - model_name: smart
+    litellm_params:
+      model: anthropic/claude-sonnet-4-5-20250929
+      api_key: os.environ/ANTHROPIC_API_KEY
+      max_tokens: 4096
+
+  # Tareas cortas y acotadas: clasificar, titular, extraer.
+  - model_name: fast
+    litellm_params:
+      model: anthropic/claude-haiku-4-5-20251001
+      api_key: os.environ/ANTHROPIC_API_KEY
+      max_tokens: 2048
+
+litellm_settings:
+  drop_params: true
+  request_timeout: 120
+  # Cachea respuestas identicas. Util mientras desarrollas y repites la misma prueba.
+  cache: true
+  cache_params:
+    type: redis
+    host: redis
+    port: 6379
+    ttl: 600
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+
+  # El tope de gasto. Un bucle de herramientas mal cerrado a las 3 de la manana
+  # es caro; esto es lo que hace que sea caro una sola vez.
+  max_budget: 25          # euros/dolares segun tu cuenta
+  budget_duration: 30d

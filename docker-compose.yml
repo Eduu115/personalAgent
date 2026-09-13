@@ -1,0 +1,135 @@
+name: puente
+
+# Regla no negociable de este proyecto: TODO contenedor lleva mem_limit.
+# Este host sirve APIArena en produccion. Sin limites, un bucle del agente
+# que se hincha hace que el OOM killer del kernel elija victima por heuristica,
+# y puede llevarse apiarena-postgres por delante.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: puente-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-puente}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?define POSTGRES_PASSWORD en .env}
+      POSTGRES_DB: ${POSTGRES_DB:-puente}
+    command: >-
+      postgres
+      -c shared_buffers=256MB
+      -c max_connections=40
+      -c work_mem=8MB
+      -c maintenance_work_mem=64MB
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-puente} -d ${POSTGRES_DB:-puente}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    mem_limit: 512m
+    memswap_limit: 512m
+    networks: [puente]
+    logging: *default-logging
+
+  redis:
+    image: redis:7-alpine
+    container_name: puente-redis
+    restart: unless-stopped
+    command: >-
+      redis-server
+      --save 60 1000
+      --maxmemory 64mb
+      --maxmemory-policy allkeys-lru
+      --appendonly no
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    mem_limit: 96m
+    memswap_limit: 96m
+    networks: [puente]
+    logging: *default-logging
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    container_name: puente-litellm
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?define ANTHROPIC_API_KEY en .env}
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?define LITELLM_MASTER_KEY en .env}
+      LITELLM_LOG: ${LITELLM_LOG:-ERROR}
+    volumes:
+      - ./config/litellm.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    # Solo en localhost del host: nadie llega aqui salvo por el tailnet.
+    ports:
+      - "127.0.0.1:4141:4000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=4).status==200 else 1)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 45s
+    mem_limit: 384m
+    memswap_limit: 384m
+    networks: [puente]
+    logging: *default-logging
+
+  agent:
+    build:
+      context: ./agent
+    image: puente/agent:dev
+    container_name: puente-agent
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-puente}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-puente}
+      REDIS_URL: redis://redis:6379/0
+      LITELLM_BASE_URL: http://litellm:4000/v1
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
+      SMART_MODEL: ${SMART_MODEL:-smart}
+      FAST_MODEL: ${FAST_MODEL:-fast}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      READ_ONLY: ${READ_ONLY:-false}
+    # El puerto que expone tailscale serve. Solo localhost.
+    ports:
+      - "127.0.0.1:${AGENT_PORT:-8420}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=4).status==200 else 1)\""]
+      interval: 20s
+      timeout: 8s
+      retries: 5
+      start_period: 20s
+    mem_limit: 512m
+    memswap_limit: 512m
+    networks: [puente]
+    logging: *default-logging
+
+volumes:
+  pg-data:
+  redis-data:
+
+networks:
+  puente:
+    name: puente
+    driver: bridge
