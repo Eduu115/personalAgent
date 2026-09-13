@@ -14,7 +14,7 @@ model_list:
   # El bucle del agente: razonar, decidir herramienta, encadenar pasos.
   - model_name: smart
     litellm_params:
-      model: anthropic/claude-sonnet-4-5-20250929
+      model: anthropic/claude-sonnet-5
       api_key: os.environ/ANTHROPIC_API_KEY
       max_tokens: 4096
 
@@ -36,10 +36,12 @@ litellm_settings:
     port: 6379
     ttl: 600
 
-general_settings:
-  master_key: os.environ/LITELLM_MASTER_KEY
-
   # El tope de gasto. Un bucle de herramientas mal cerrado a las 3 de la manana
   # es caro; esto es lo que hace que sea caro una sola vez.
-  max_budget: 25          # euros/dolares segun tu cuenta
+  # Va en litellm_settings (en general_settings se ignora) y solo se aplica si
+  # LiteLLM tiene DATABASE_URL: sin base de datos falla en abierto, sin avisar.
+  max_budget: 25          # USD, que es en lo que factura Anthropic
   budget_duration: 30d
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

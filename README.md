@@ -48,6 +48,15 @@ El esquema SQL se aplica solo la primera vez que arranca Postgres (via
 `/docker-entrypoint-initdb.d`). Si cambias el esquema despues, o lo migras a mano
 o tiras el volumen con `docker compose down -v` (borra las conversaciones).
 
+LiteLLM usa su propia base `litellm` en ese mismo Postgres (la crea
+`db/init/02_litellm_db.sql`). Sin ella el tope de gasto **no se aplica**: LiteLLM
+falla en abierto sin avisar. Si el volumen ya existia de antes, creala a mano:
+
+```bash
+docker compose exec postgres psql -U puente -d puente -c "CREATE DATABASE litellm"
+docker compose up -d litellm
+```
+
 ## 3. Comprobar en local
 
 ```bash
