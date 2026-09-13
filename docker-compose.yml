@@ -70,9 +70,16 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      # la cache de respuestas vive en redis
+      redis:
+        condition: service_healthy
     environment:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?define ANTHROPIC_API_KEY en .env}
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?define LITELLM_MASTER_KEY en .env}
+      # Base propia (db/init/02_litellm_db.sql). Sin ella max_budget no se aplica.
+      # connection_limit acota el pool de Prisma, que por defecto es 2*CPU+1 y
+      # con 12 hilos agotaria el max_connections=40 de postgres.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-puente}:${POSTGRES_PASSWORD}@postgres:5432/litellm?connection_limit=5
       LITELLM_LOG: ${LITELLM_LOG:-ERROR}
     volumes:
       - ./config/litellm.yaml:/app/config.yaml:ro
@@ -86,8 +93,11 @@ services:
       timeout: 10s
       retries: 5
       start_period: 45s
-    mem_limit: 384m
-    memswap_limit: 384m
+    # Medido (LiteLLM 1.100.1, con DATABASE_URL): ~820 MiB en reposo y pico de
+    # ~1,29 GiB al arrancar, mientras Prisma migra. Con 384m moria por OOM antes
+    # de terminar de importar. 1536m = pico + ~20%.
+    mem_limit: 1536m
+    memswap_limit: 1536m
     networks: [puente]
     logging: *default-logging
 

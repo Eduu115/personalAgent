@@ -25,7 +25,7 @@ tailscale cert --help >/dev/null && echo "HTTPS disponible"
 
 ```bash
 cd ~/apps
-git clone <tu-repo> puente && cd puente
+git clone https://github.com/Eduu115/personalAgent.git puente && cd puente
 
 cp .env.example .env
 openssl rand -hex 24   # -> POSTGRES_PASSWORD
@@ -39,6 +39,19 @@ vigentes en <https://docs.claude.com/en/docs/about-claude/models>.
 ## 2. Levantar
 
 ```bash
+./scripts/deploy.sh
+```
+
+El script es el mismo para el primer despliegue y para cada actualizacion:
+comprueba `.env`, puertos, RAM libre y que no haya cambios locales; hace
+`git pull --ff-only`, crea la base `litellm` si falta, levanta el stack
+esperando a que todo este *healthy* y termina con `/readyz`, OOM y consumo.
+Si algo no cuadra se para antes de tocar nada. Acepta una rama como argumento
+(`./scripts/deploy.sh mi-rama`); por defecto `master`.
+
+A mano, sin el script:
+
+```bash
 docker compose up -d --build
 docker compose ps
 docker compose logs -f agent
@@ -47,6 +60,15 @@ docker compose logs -f agent
 El esquema SQL se aplica solo la primera vez que arranca Postgres (via
 `/docker-entrypoint-initdb.d`). Si cambias el esquema despues, o lo migras a mano
 o tiras el volumen con `docker compose down -v` (borra las conversaciones).
+
+LiteLLM usa su propia base `litellm` en ese mismo Postgres (la crea
+`db/init/02_litellm_db.sql`). Sin ella el tope de gasto **no se aplica**: LiteLLM
+falla en abierto sin avisar. Si el volumen ya existia de antes, creala a mano:
+
+```bash
+docker compose exec postgres psql -U puente -d puente -c "CREATE DATABASE litellm"
+docker compose up -d litellm
+```
 
 ## 3. Comprobar en local
 

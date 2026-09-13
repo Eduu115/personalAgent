@@ -1,0 +1,3 @@
+# Todo en LF. El server es Linux y los ficheros se montan tal cual en los
+# contenedores: un CRLF en un .sh o en el .sql de init rompe de formas raras.
+* text=auto eol=lf
