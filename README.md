@@ -25,7 +25,7 @@ tailscale cert --help >/dev/null && echo "HTTPS disponible"
 
 ```bash
 cd ~/apps
-git clone <tu-repo> puente && cd puente
+git clone https://github.com/Eduu115/personalAgent.git puente && cd puente
 
 cp .env.example .env
 openssl rand -hex 24   # -> POSTGRES_PASSWORD
@@ -37,6 +37,19 @@ Revisa `config/litellm.yaml` y confirma que los identificadores de modelo siguen
 vigentes en <https://docs.claude.com/en/docs/about-claude/models>.
 
 ## 2. Levantar
+
+```bash
+./scripts/deploy.sh
+```
+
+El script es el mismo para el primer despliegue y para cada actualizacion:
+comprueba `.env`, puertos, RAM libre y que no haya cambios locales; hace
+`git pull --ff-only`, crea la base `litellm` si falta, levanta el stack
+esperando a que todo este *healthy* y termina con `/readyz`, OOM y consumo.
+Si algo no cuadra se para antes de tocar nada. Acepta una rama como argumento
+(`./scripts/deploy.sh mi-rama`); por defecto `master`.
+
+A mano, sin el script:
 
 ```bash
 docker compose up -d --build
