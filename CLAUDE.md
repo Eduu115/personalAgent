@@ -139,9 +139,10 @@ Siguiente: enchufar el MCP al bucle del agente (tool-calling en `/api/chat`,
 registrando cada llamada en `tool_calls`). Despues, OAuth de Google en solo
 lectura.
 
-Lo que **no** hay todavia, a proposito: herramientas, cola de aprobaciones, PWA,
-memoria de largo plazo, autenticacion propia (de momento la identidad del tailnet
-hace de puerta).
+Lo que **no** hay todavia, a proposito: herramientas con efectos (las cuatro de
+`homelab-mcp` son de lectura), el MCP enchufado al bucle del agente, cola de
+aprobaciones, PWA, memoria de largo plazo, autenticacion propia (de momento la
+identidad del tailnet hace de puerta).
 
 ## Hoja de ruta
 

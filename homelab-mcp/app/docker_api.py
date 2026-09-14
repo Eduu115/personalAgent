@@ -22,6 +22,9 @@ TIMEOUT = httpx.Timeout(10.0, read=20.0)
 
 MAX_LINEAS = 500
 
+# Un prefijo de id mas corto casa con demasiadas cosas por accidente.
+MIN_PREFIJO_ID = 6
+
 
 class ErrorDocker(RuntimeError):
     pass
@@ -47,43 +50,78 @@ def _mib(valor: int | float | None) -> float | None:
     return round(valor / 1048576, 1) if valor else None
 
 
+def _nombres(c: dict[str, Any]) -> list[str]:
+    return [n.lstrip("/") for n in (c.get("Names") or [])]
+
+
+def _formatear(c: dict[str, Any]) -> dict[str, Any]:
+    estado = c.get("Status", "")
+    return {
+        "nombre": (_nombres(c) or ["?"])[0],
+        "id": c.get("Id", "")[:12],
+        "imagen": c.get("Image"),
+        "estado": c.get("State"),
+        "detalle": estado,
+        # Docker mete la salud dentro de Status: "Up 2 hours (healthy)"
+        "salud": (
+            "healthy" if "(healthy)" in estado
+            else "unhealthy" if "(unhealthy)" in estado
+            else "starting" if "(health: starting)" in estado
+            else None
+        ),
+        "proyecto": (c.get("Labels") or {}).get("com.docker.compose.project"),
+    }
+
+
+async def _crudos(todos: bool = True) -> list[dict[str, Any]]:
+    return (await _get("/containers/json", all=1 if todos else 0)).json()
+
+
 async def listar_contenedores(todos: bool = True) -> list[dict[str, Any]]:
-    r = await _get("/containers/json", all=1 if todos else 0)
-    salida = []
-    for c in r.json():
-        nombre = (c.get("Names") or ["/?"])[0].lstrip("/")
-        estado = c.get("Status", "")
-        salida.append(
-            {
-                "nombre": nombre,
-                "id": c.get("Id", "")[:12],
-                "imagen": c.get("Image"),
-                "estado": c.get("State"),
-                "detalle": estado,
-                # Docker mete la salud dentro de Status: "Up 2 hours (healthy)"
-                "salud": (
-                    "healthy" if "(healthy)" in estado
-                    else "unhealthy" if "(unhealthy)" in estado
-                    else "starting" if "(health: starting)" in estado
-                    else None
-                ),
-                "proyecto": (c.get("Labels") or {}).get("com.docker.compose.project"),
-            }
-        )
+    salida = [_formatear(c) for c in await _crudos(todos)]
     return sorted(salida, key=lambda x: (x["proyecto"] or "~", x["nombre"]))
 
 
 async def _resolver(nombre: str) -> dict[str, Any]:
-    """Valida el nombre contra los contenedores que existen de verdad.
+    """Valida el argumento contra los contenedores que existen de verdad.
 
-    Es la validacion que evita que el argumento sea cualquier cosa: no hay
-    allowlist que mantener, pero tampoco se acepta un identificador inventado.
+    Vale el nombre exacto o un prefijo del id de al menos MIN_PREFIJO_ID
+    caracteres que case con uno solo. No hay allowlist que mantener, pero
+    tampoco se acepta un identificador inventado, vacio o ambiguo.
     """
-    for c in await listar_contenedores(todos=True):
-        if c["nombre"] == nombre or c["id"].startswith(nombre):
-            return c
-    conocidos = ", ".join(c["nombre"] for c in await listar_contenedores())
+    if not nombre or not nombre.strip():
+        raise ErrorDocker("hace falta el nombre exacto del contenedor o un prefijo de su id")
+
+    crudos = await _crudos(todos=True)
+    for c in crudos:
+        if nombre in _nombres(c):
+            return _formatear(c)
+
+    conocidos = ", ".join(sorted(n for c in crudos for n in _nombres(c)[:1]))
+    if len(nombre) < MIN_PREFIJO_ID:
+        raise ErrorDocker(
+            f"no hay ningun contenedor llamado '{nombre}', y como prefijo de id es "
+            f"demasiado corto (minimo {MIN_PREFIJO_ID}). Hay estos: {conocidos}"
+        )
+
+    casan = [c for c in crudos if c.get("Id", "").startswith(nombre.lower())]
+    if len(casan) == 1:
+        return _formatear(casan[0])
+    if len(casan) > 1:
+        varios = ", ".join(f"{_formatear(c)['nombre']} ({c['Id'][:12]})" for c in casan)
+        raise ErrorDocker(f"el prefijo '{nombre}' casa con varios contenedores: {varios}")
     raise ErrorDocker(f"no existe ningun contenedor '{nombre}'. Hay estos: {conocidos}")
+
+
+def _es_multiplexado(bruto: bytes) -> bool:
+    """Sin TTY, Docker entrama cada trozo con 8 bytes: [stream, 0, 0, 0, tamano x4].
+
+    stream es 0 (stdin), 1 (stdout) o 2 (stderr). Con TTY la salida va en crudo
+    y empieza por texto, que nunca tiene esa forma. Se mira la cabecera en vez
+    de preguntar a /containers/{id}/json por Config.Tty, porque ese endpoint
+    devuelve tambien Config.Env: las variables de entorno, secretos incluidos.
+    """
+    return len(bruto) >= 8 and bruto[0] in (0, 1, 2) and bruto[1:4] == b"\x00\x00\x00"
 
 
 def _demultiplexar(bruto: bytes) -> str:
@@ -102,15 +140,12 @@ async def logs(nombre: str, lineas: int = 100) -> dict[str, Any]:
     c = await _resolver(nombre)
     lineas = max(1, min(int(lineas), MAX_LINEAS))
 
-    insp = (await _get(f"/containers/{c['id']}/json")).json()
-    tiene_tty = bool(insp.get("Config", {}).get("Tty"))
-
     r = await _get(
         f"/containers/{c['id']}/logs",
         stdout=1, stderr=1, tail=lineas, timestamps=1,
     )
     bruto = r.content
-    texto = bruto.decode("utf-8", "replace") if tiene_tty else _demultiplexar(bruto)
+    texto = _demultiplexar(bruto) if _es_multiplexado(bruto) else bruto.decode("utf-8", "replace")
 
     texto, redactados = redactar(texto)
     if redactados:
