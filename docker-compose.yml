@@ -205,7 +205,21 @@ services:
     ports:
       - "127.0.0.1:${MCP_PORT:-8421}:8000"
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/mcp', timeout=4).status < 500 else 1)\""]
+      # Un GET a /mcp sin cabeceras de sesion devuelve 406 por diseno del
+      # transporte streamable-http, y urlopen lo lanza como excepcion. Lo que se
+      # mide es que el servidor responde: cualquier codigo por debajo de 500 vale.
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import sys, urllib.request, urllib.error
+          try:
+              urllib.request.urlopen("http://127.0.0.1:8000/mcp", timeout=4)
+          except urllib.error.HTTPError as exc:
+              sys.exit(1 if exc.code >= 500 else 0)
+          except Exception:
+              sys.exit(1)
       interval: 30s
       timeout: 8s
       retries: 5
