@@ -91,7 +91,11 @@ def discos() -> list[dict[str, Any]]:
     comprobar_montajes()
     vistos: set[str] = set()
     salida: list[dict[str, Any]] = []
-    with open(f"{PROC}/mounts", encoding="utf-8") as f:
+    # /proc/1/mounts y no /proc/mounts: este ultimo enlaza a self/mounts, y
+    # "self" es este proceso, asi que devolveria los montajes del contenedor
+    # (/etc/hostname, /etc/hosts...) y no los del host. Con python suelto en el
+    # host coinciden y el fallo no se ve. El pid 1 del host es su init.
+    with open(f"{PROC}/1/mounts", encoding="utf-8") as f:
         lineas = f.readlines()
     for linea in lineas:
         campos = linea.split()

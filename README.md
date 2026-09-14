@@ -159,11 +159,26 @@ Y a probar:
 
 ### Comprobarlo a mano
 
+El transporte tiene sesiones: un `tools/list` a pelo devuelve
+`400 Missing session ID`. Primero `initialize`, y con el `mcp-session-id` que
+devuelve, el resto:
+
 ```bash
-curl -s localhost:8421/mcp -H 'accept: application/json, text/event-stream' \
-  -H 'content-type: application/json' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | head -40
+H=(-H 'accept: application/json, text/event-stream' -H 'content-type: application/json')
+
+SID=$(curl -si localhost:8421/mcp "${H[@]}" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}' \
+  | awk -F': ' 'tolower($1)=="mcp-session-id" {print $2}' | tr -d '\r')
+
+curl -s localhost:8421/mcp "${H[@]}" -H "mcp-session-id: $SID" \
+  -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+
+curl -s localhost:8421/mcp "${H[@]}" -H "mcp-session-id: $SID" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | grep -o '"name":"lab_[a-z_]*"'
 ```
+
+Tiene que listar las cuatro herramientas. Para llamar a una, el mismo patron con
+`"method":"tools/call","params":{"name":"lab_host","arguments":{}}`.
 
 ## Endpoints
 
