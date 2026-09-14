@@ -48,6 +48,15 @@ if puerto_ocupado 4141 && ! contenedor_vivo puente-litellm; then
     fallo "el puerto 4141 esta ocupado por otro proceso: ss -ltnp | grep 4141"
 fi
 
+MCP_PORT="$(grep -E '^MCP_PORT=' .env | cut -d= -f2)"
+MCP_PORT="${MCP_PORT:-8421}"
+if puerto_ocupado "$MCP_PORT" && ! contenedor_vivo puente-homelab-mcp; then
+    fallo "el puerto $MCP_PORT esta ocupado por otro proceso: ss -ltnp | grep $MCP_PORT"
+fi
+
+# El socket de Docker solo lo ve el proxy. Si no esta, homelab-mcp no arranca.
+[ -S /var/run/docker.sock ] || fallo "no existe /var/run/docker.sock" 
+
 # Contenedores llamados puente-* que no son de este proyecto compose.
 ajenos="$(docker ps -a --filter 'name=^puente-' \
     --format '{{.Names}} {{.Label "com.docker.compose.project"}}' | awk '$2 != "puente" {print $1}')"
@@ -102,6 +111,24 @@ docker compose up -d --build --remove-orphans --wait --wait-timeout 300
 log "verificacion"
 curl -fsS -m 5 "http://127.0.0.1:${AGENT_PORT}/readyz"
 echo
+
+# El socket-proxy tiene que rechazar cualquier escritura. Si esto devolviera
+# 2xx, el proxy estaria mal configurado y el agente podria parar contenedores.
+codigo="$(docker compose exec -T homelab-mcp python -c "
+import urllib.request, urllib.error
+try:
+    urllib.request.urlopen(urllib.request.Request(
+        'http://docker-socket-proxy:2375/containers/x/stop', method='POST'), timeout=5)
+    print('200')
+except urllib.error.HTTPError as e:
+    print(e.code)
+except Exception as e:
+    print('error:', e)
+")"
+case "$codigo" in
+    403|405) echo "socket-proxy: escrituras bloqueadas ($codigo) OK" ;;
+    *) fallo "el socket-proxy NO esta bloqueando las escrituras (devolvio $codigo)" ;;
+esac
 
 oom=0
 for c in $(docker compose ps -q); do
