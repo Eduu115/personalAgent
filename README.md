@@ -126,6 +126,60 @@ El stack completo deberia quedarse sobre 1,2-1,5 GB en reposo (LiteLLM es el que
 mas come). Si algun contenedor esta pegado a su `mem_limit`, subelo en el compose
 en vez de quitarlo — un limite alcanzado es informacion, no un estorbo.
 
+## homelab-mcp
+
+Los ojos del asistente sobre el homelab. Cuatro herramientas, todas de lectura:
+
+| Herramienta | Que devuelve |
+|---|---|
+| `lab_status` | Estado, salud e imagen de cada contenedor, mas el resumen de Docker |
+| `lab_host` | Memoria, swap, carga por nucleo y discos del anfitrion |
+| `lab_stats` | Memoria de un contenedor y cuanto le queda para su `mem_limit` |
+| `lab_logs` | Ultimas lineas de un contenedor, con los secretos redactados |
+
+El socket de Docker solo lo ve `docker-socket-proxy`, configurado con `POST=0`:
+por este camino no se puede arrancar, parar ni borrar nada. `deploy.sh` lo
+verifica en cada despliegue lanzando un POST que tiene que ser rechazado.
+
+### Usarlo desde Claude Code
+
+Se publica en `127.0.0.1:8421`, asi que el mismo servidor sirve al agente y a
+Claude Code sin duplicar la integracion:
+
+```bash
+claude mcp add --transport http homelab http://127.0.0.1:8421/mcp
+```
+
+Y a probar:
+
+```
+> como esta el server?
+> ensename las ultimas 50 lineas de apiarena-kafka
+```
+
+### Comprobarlo a mano
+
+El transporte tiene sesiones: un `tools/list` a pelo devuelve
+`400 Missing session ID`. Primero `initialize`, y con el `mcp-session-id` que
+devuelve, el resto:
+
+```bash
+H=(-H 'accept: application/json, text/event-stream' -H 'content-type: application/json')
+
+SID=$(curl -si localhost:8421/mcp "${H[@]}" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}' \
+  | awk -F': ' 'tolower($1)=="mcp-session-id" {print $2}' | tr -d '\r')
+
+curl -s localhost:8421/mcp "${H[@]}" -H "mcp-session-id: $SID" \
+  -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+
+curl -s localhost:8421/mcp "${H[@]}" -H "mcp-session-id: $SID" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | grep -o '"name":"lab_[a-z_]*"'
+```
+
+Tiene que listar las cuatro herramientas. Para llamar a una, el mismo patron con
+`"method":"tools/call","params":{"name":"lab_host","arguments":{}}`.
+
 ## Endpoints
 
 | Metodo | Ruta | Que hace |

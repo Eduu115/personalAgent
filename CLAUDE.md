@@ -116,12 +116,33 @@ Lo que hay montado:
   titulacion automatica con el modelo barato, `/healthz` y `/readyz`.
 - `db.log_tool_call()` lista para cuando lleguen las herramientas.
 
-**Criterio de "hecho" de la F0:** Edu escribe desde el movil con datos moviles,
-fuera de casa, y el agente responde.
+**F0 CERRADA (13 sept 2026).** Verificado desde el movil con datos moviles fuera
+de casa. El agente se sirve en `https://puente.tail8b5ea7.ts.net:8443`.
 
-Lo que **no** hay todavia, a proposito: herramientas, cola de aprobaciones, PWA,
-memoria de largo plazo, autenticacion propia (de momento la identidad del tailnet
-hace de puerta).
+Ojo con el puerto: va en el **8443 y no en el 443** porque el `docker-proxy` de
+nginx-proxy escucha en `0.0.0.0:443` y ese comodin se queda tambien con la
+interfaz de Tailscale. `tailscale serve` se configura sin error pero las
+peticiones mueren en nginx-proxy con un `tlsv1 unrecognized name`, que parece un
+problema de certificado y no lo es.
+
+## En curso: F1, primer paso
+
+`homelab-mcp` levantado: servidor MCP por HTTP en `127.0.0.1:8421/mcp` con
+`lab_status`, `lab_host`, `lab_stats` y `lab_logs`, todas de nivel `read`.
+El socket de Docker solo lo ve `docker-socket-proxy` con `POST=0`, en una red
+`internal: true` que no tiene salida.
+
+`lab_logs` redacta secretos antes de devolver nada (`app/redact.py`) y marca su
+salida como contenido no confiable, que es la regla 2 aplicada donde toca.
+
+Siguiente: enchufar el MCP al bucle del agente (tool-calling en `/api/chat`,
+registrando cada llamada en `tool_calls`). Despues, OAuth de Google en solo
+lectura.
+
+Lo que **no** hay todavia, a proposito: herramientas con efectos (las cuatro de
+`homelab-mcp` son de lectura), el MCP enchufado al bucle del agente, cola de
+aprobaciones, PWA, memoria de largo plazo, autenticacion propia (de momento la
+identidad del tailnet hace de puerta).
 
 ## Hoja de ruta
 

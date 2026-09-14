@@ -135,6 +135,100 @@ services:
     networks: [puente]
     logging: *default-logging
 
+  # ---------------------------------------------------------------- homelab
+
+  # El unico contenedor que ve el socket de Docker. Con POST=0 no hay forma de
+  # arrancar, parar ni borrar nada por este camino: solo lectura, de verdad.
+  # Vive en una red interna sin salida, junto al MCP y con nadie mas.
+  docker-socket-proxy:
+    image: tecnativa/docker-socket-proxy:0.3.0
+    container_name: puente-socket-proxy
+    restart: unless-stopped
+    environment:
+      CONTAINERS: 1
+      INFO: 1
+      VERSION: 1
+      PING: 1
+      # Todo lo demas queda en 0 por defecto. POST explicito para que se lea.
+      POST: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:2375/_ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 48m
+    memswap_limit: 48m
+    networks: [lab]
+    logging: *default-logging
+
+  homelab-mcp:
+    build:
+      context: ./homelab-mcp
+    image: puente/homelab-mcp:dev
+    container_name: puente-homelab-mcp
+    restart: unless-stopped
+    depends_on:
+      docker-socket-proxy:
+        condition: service_healthy
+    environment:
+      DOCKER_API: http://docker-socket-proxy:2375
+      HOSTFS: /hostfs
+      PROC_PATH: /host/proc
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    volumes:
+      # Solo lectura y sin root: solo alcanza lo que ya es legible por todos.
+      # Es el patron de node-exporter. De aqui salen memoria, carga y discos.
+      - type: bind
+        source: /proc
+        target: /host/proc
+        read_only: true
+      - type: bind
+        source: /
+        target: /hostfs
+        read_only: true
+        bind:
+          # Sin rslave, un bind de / no arrastra los submontajes y statvfs de
+          # cualquier particion aparte devolveria los datos de / sin avisar.
+          propagation: rslave
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    security_opt:
+      - no-new-privileges:true
+    # Publicado en localhost para que Claude Code en el server use el mismo
+    # servidor MCP que el agente. Una integracion, dos clientes.
+    ports:
+      - "127.0.0.1:${MCP_PORT:-8421}:8000"
+    healthcheck:
+      # Un GET a /mcp sin cabeceras de sesion devuelve 406 por diseno del
+      # transporte streamable-http, y urlopen lo lanza como excepcion. Lo que se
+      # mide es que el servidor responde: cualquier codigo por debajo de 500 vale.
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import sys, urllib.request, urllib.error
+          try:
+              urllib.request.urlopen("http://127.0.0.1:8000/mcp", timeout=4)
+          except urllib.error.HTTPError as exc:
+              sys.exit(1 if exc.code >= 500 else 0)
+          except Exception:
+              sys.exit(1)
+      interval: 30s
+      timeout: 8s
+      retries: 5
+      start_period: 15s
+    mem_limit: 256m
+    memswap_limit: 256m
+    networks: [puente, lab]
+    logging: *default-logging
+
 volumes:
   pg-data:
   redis-data:
@@ -143,3 +237,9 @@ networks:
   puente:
     name: puente
     driver: bridge
+  # Sin salida a ninguna parte: el socket-proxy no necesita internet y no lo
+  # tiene. Solo lo alcanza homelab-mcp, que esta en las dos redes.
+  lab:
+    name: puente-lab
+    driver: bridge
+    internal: true
