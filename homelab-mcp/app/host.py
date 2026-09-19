@@ -111,8 +111,13 @@ def discos() -> list[dict[str, Any]]:
             st = os.statvfs(ruta)
         except OSError:
             continue
+        # Mismas cuentas que df. ext4 reserva un 5% para root: f_bfree lo
+        # incluye y f_bavail no. Calcular (total - bavail) / total cuenta esa
+        # reserva como ocupada y en el disco de 1,8T se va 2,4 puntos (92 GiB)
+        # respecto a df. df hace usado / (usado + disponible), que la deja fuera.
         total = st.f_blocks * st.f_frsize
-        libre = st.f_bavail * st.f_frsize
+        usado = total - st.f_bfree * st.f_frsize
+        disponible = st.f_bavail * st.f_frsize  # la columna "Disp" de df
         if total == 0:
             continue
         vistos.add(dispositivo)
@@ -121,8 +126,8 @@ def discos() -> list[dict[str, Any]]:
                 "punto_montaje": punto,
                 "dispositivo": dispositivo,
                 "total_gib": round(total / 1073741824, 1),
-                "libre_gib": round(libre / 1073741824, 1),
-                "usado_pct": round((total - libre) / total * 100, 1),
+                "libre_gib": round(disponible / 1073741824, 1),
+                "usado_pct": round(usado / (usado + disponible) * 100, 1) if usado + disponible else None,
             }
         )
     return sorted(salida, key=lambda d: d["punto_montaje"])

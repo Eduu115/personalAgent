@@ -37,7 +37,9 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
     fallo "hay cambios locales sin commitear en el server"
 fi
 
-AGENT_PORT="$(grep -E '^AGENT_PORT=' .env | cut -d= -f2)"
+# sed y no grep | cut: si la variable no esta, grep sale con 1 y con set -e y
+# pipefail el script muere en silencio, sin llegar al valor por defecto.
+AGENT_PORT="$(sed -n 's/^AGENT_PORT=//p' .env)"
 AGENT_PORT="${AGENT_PORT:-8420}"
 
 # Un puerto ocupado solo vale si lo tiene nuestro propio contenedor.
@@ -48,14 +50,14 @@ if puerto_ocupado 4141 && ! contenedor_vivo puente-litellm; then
     fallo "el puerto 4141 esta ocupado por otro proceso: ss -ltnp | grep 4141"
 fi
 
-MCP_PORT="$(grep -E '^MCP_PORT=' .env | cut -d= -f2)"
+MCP_PORT="$(sed -n 's/^MCP_PORT=//p' .env)"
 MCP_PORT="${MCP_PORT:-8421}"
 if puerto_ocupado "$MCP_PORT" && ! contenedor_vivo puente-homelab-mcp; then
     fallo "el puerto $MCP_PORT esta ocupado por otro proceso: ss -ltnp | grep $MCP_PORT"
 fi
 
 # El socket de Docker solo lo ve el proxy. Si no esta, homelab-mcp no arranca.
-[ -S /var/run/docker.sock ] || fallo "no existe /var/run/docker.sock" 
+[ -S /var/run/docker.sock ] || fallo "no existe /var/run/docker.sock"
 
 # Contenedores llamados puente-* que no son de este proyecto compose.
 ajenos="$(docker ps -a --filter 'name=^puente-' \
@@ -68,7 +70,7 @@ disponible_mib="$(awk '/^MemAvailable:/ {print int($2 / 1024)}' /proc/meminfo)"
 if ! contenedor_vivo puente-litellm && [ "$disponible_mib" -lt 1800 ]; then
     fallo "solo hay ${disponible_mib} MiB disponibles y el primer arranque necesita ~1,8 GiB"
 fi
-echo "RAM disponible: ${disponible_mib} MiB"
+echo "OK: rama $RAMA, puertos agente $AGENT_PORT / litellm 4141 / mcp $MCP_PORT, ${disponible_mib} MiB disponibles"
 
 # ---------------------------------------------------------------- codigo
 
