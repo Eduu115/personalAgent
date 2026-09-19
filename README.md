@@ -273,16 +273,61 @@ Todo esta cerrado por defecto (`deny-all`) y la web de ntfy, apagada.
 
 ### Suscribirse desde el movil (Android)
 
-Con Tailscale activo en el movil y la app ntfy (Google Play o F-Droid):
+Con Tailscale activo en el movil y la app ntfy (Google Play o F-Droid). La app
+entra al servidor de una de estas dos formas, **y solo de estas dos**:
+
+| Forma | Usuario en la app | Contrasena en la app |
+|---|---|---|
+| Token | **vacio** | el `NTFY_TOKEN_SUSCRIBIR` |
+| Usuario y contrasena | `edu` | la contrasena cuyo hash esta en `NTFY_PASS_HASH_EDU` |
+
+Lo que **no** funciona, y costo tres intentos averiguarlo: usuario `edu` con el
+token de contrasena. La app manda Basic auth, y ntfy solo acepta un token como
+contrasena si el usuario va vacio. Si la app no deja el usuario vacio, usa la
+segunda forma. Comprobado contra el servidor:
+
+| Autenticacion | Resultado |
+|---|---|
+| `Authorization: Bearer <token>` | 200 |
+| Basic `(vacio):<token>` | 200 |
+| Basic `edu:<contrasena>` | 200 |
+| Basic `edu:<token>` | **401** |
+
+Las dos formas dan lo mismo: `edu` solo puede leer el topic `briefing`.
 
 1. **Ajustes > Usuarios > Anadir usuario.** Servidor
-   `https://puente.<tailnet>.ts.net:8444`, usuario **vacio** y como contrasena
-   el `NTFY_TOKEN_SUSCRIBIR`. ntfy toma un usuario vacio con un token de
-   contrasena como acceso por token.
+   `https://puente.<tailnet>.ts.net:8444` y una de las dos formas de la tabla.
 2. **+ > Suscribirse a un tema.** Tema `briefing`, marca *Usar otro servidor* y
    pon la misma URL.
 3. Activa **Entrega instantanea** en esa suscripcion: con un servidor propio, sin
    ella la app de Google Play puede tardar en enterarse.
+
+### Las contrasenas de ntfy
+
+Los usuarios `puente` y `edu` llevan el hash bcrypt de su contrasena en `.env`
+(`NTFY_PASS_HASH_PUENTE` y `NTFY_PASS_HASH_EDU`). La de `edu` es la de la app si
+no usas el token. La de `puente` no la usa nadie, porque el agente publica con
+su token: ponle una aleatoria y olvidala. Cada hash sale de:
+
+```bash
+docker run --rm -it binwiederhier/ntfy:v2.28.0 user hash
+```
+
+**Cuidado con los `$` del hash** (`$2a$10$...`): Compose los toma por variables y
+corta el hash **sin avisar**. ntfy recibe otro hash y la contrasena no entra.
+
+- En `.env`, el hash va **entre comillas simples**:
+  `NTFY_PASS_HASH_EDU='$2a$10$...'`. Sin comillas o con comillas dobles, un trozo
+  como `$CSmhGlHGuuIUf3y` desaparece como si fuera una variable vacia.
+  `deploy.sh` falla si no estan las comillas simples.
+- Si alguna vez escribes un hash **directamente en `docker-compose.yml`**, cada
+  `$` va doble: `$$2a$$10$$...`.
+
+Para ver lo que le llega de verdad a ntfy:
+
+```bash
+docker compose exec ntfy sh -c 'echo "$NTFY_AUTH_USERS"'
+```
 
 ## Desarrollo en Mac o Windows
 

@@ -307,7 +307,8 @@ services:
   # el topic briefing con un token que solo escribe, y el movil se suscribe con
   # otro que solo lee. Usuarios, permisos y tokens se aprovisionan en cada
   # arranque desde .env, asi que la base de auth vive en un tmpfs y no hay
-  # volumen que cuidar. La web de ntfy, apagada: el movil usa la app.
+  # volumen que cuidar. La web de ntfy, apagada: el movil usa la app, que entra
+  # con el token (usuario vacio) o como edu con su contrasena (README).
   ntfy:
     image: binwiederhier/ntfy:v2.28.0
     container_name: puente-ntfy
@@ -320,9 +321,10 @@ services:
       NTFY_WEB_ROOT: disable
       NTFY_AUTH_FILE: /var/lib/ntfy/auth.db
       NTFY_AUTH_DEFAULT_ACCESS: deny-all
-      # Hashes bcrypt de contrasenas aleatorias que no se guardaron en ningun
-      # sitio: estos usuarios solo entran por token. No son secretos.
-      NTFY_AUTH_USERS: "puente:$$2a$$10$$dXcjUdfBQsVTGiVPrIs.7uQnuaDlWrhRLZ62E1Q8PyLQ3nti0uVbG:user,edu:$$2a$$10$$CSmhGlHGuuIUf3y.t9mTQOiPlFp6TrVTUBytI/9unIiHealoH94.O:user"
+      # Los hashes bcrypt vienen de .env, entre comillas simples: sin ellas
+      # Compose toma los $ del hash por variables y lo corta sin avisar. Si
+      # alguna vez se escriben aqui directamente, cada $ va doble ($$).
+      NTFY_AUTH_USERS: "puente:${NTFY_PASS_HASH_PUENTE:?define NTFY_PASS_HASH_PUENTE en .env (ver .env.example)}:user,edu:${NTFY_PASS_HASH_EDU:?define NTFY_PASS_HASH_EDU en .env (ver .env.example)}:user"
       NTFY_AUTH_ACCESS: "puente:briefing:wo,edu:briefing:ro"
       NTFY_AUTH_TOKENS: "puente:${NTFY_TOKEN_PUBLICAR:?define NTFY_TOKEN_PUBLICAR en .env (ver .env.example)}:agente,edu:${NTFY_TOKEN_SUSCRIBIR:?define NTFY_TOKEN_SUSCRIBIR en .env (ver .env.example)}:movil"
     read_only: true

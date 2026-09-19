@@ -45,6 +45,11 @@ grep -qE '^REDIS_PASSWORD=.+' .env || fallo "REDIS_PASSWORD vacio en .env: opens
 for t in NTFY_TOKEN_PUBLICAR NTFY_TOKEN_SUSCRIBIR; do
     grep -qE "^$t=tk_[a-z0-9]{29}\$" .env || fallo "$t vacio o mal formado en .env: docker run --rm binwiederhier/ntfy:v2.28.0 token generate"
 done
+# Entre comillas simples o Compose se come los $ del hash y ntfy recibe otro.
+for h in NTFY_PASS_HASH_PUENTE NTFY_PASS_HASH_EDU; do
+    grep -qE "^$h='\\\$2[aby]\\\$[0-9]{2}\\\$[./A-Za-z0-9]{53}'\$" .env \
+        || fallo "$h vacio o sin comillas simples en .env: $h='\$2a\$10\$...' (docker run --rm -it binwiederhier/ntfy:v2.28.0 user hash)"
+done
 
 # En el server no se edita a mano: lo que no esta en git no existe.
 if ! git diff --quiet || ! git diff --cached --quiet; then
