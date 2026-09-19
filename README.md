@@ -137,9 +137,16 @@ Los ojos del asistente sobre el homelab. Cuatro herramientas, todas de lectura:
 | `lab_stats` | Memoria de un contenedor y cuanto le queda para su `mem_limit` |
 | `lab_logs` | Ultimas lineas de un contenedor, con los secretos redactados |
 
-El socket de Docker solo lo ve `docker-socket-proxy`, configurado con `POST=0`:
-por este camino no se puede arrancar, parar ni borrar nada. `deploy.sh` lo
-verifica en cada despliegue lanzando un POST que tiene que ser rechazado.
+El socket de Docker solo lo ve `docker-socket-proxy`, un HAProxy con lista blanca
+en `config/haproxy.cfg`: solo GET y solo `/_ping`, `/info`, `/version`,
+`/containers/json`, `/containers/{id}/logs` y `/containers/{id}/stats`. Todo lo
+demas da 403, incluido `/containers/{id}/json`, que devolveria las variables de
+entorno (los secretos) de todos los contenedores. `deploy.sh` lo verifica en cada
+despliegue: un POST, `json`, `archive` y `export` tienen que dar 403, y el
+despliegue falla si alguno pasa.
+
+Corre sin root; entra al socket por el grupo que es su dueno, `DOCKER_GID` en
+`.env`. `deploy.sh` lo detecta y lo anade si falta.
 
 ### Usarlo desde Claude Code
 

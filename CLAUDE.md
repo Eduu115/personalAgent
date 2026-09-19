@@ -140,8 +140,10 @@ problema de certificado y no lo es.
 
 `homelab-mcp` levantado: servidor MCP por HTTP en `127.0.0.1:8421/mcp` con
 `lab_status`, `lab_host`, `lab_stats` y `lab_logs`, todas de nivel `read`.
-El socket de Docker solo lo ve `docker-socket-proxy` con `POST=0`, en una red
-`internal: true` que no tiene salida.
+El socket de Docker solo lo ve `docker-socket-proxy`: HAProxy sin root con lista
+blanca por ruta (`config/haproxy.cfg`), solo GET y solo seis endpoints de lectura,
+en una red `internal: true` que no tiene salida. `/containers/{id}/json`, que
+devuelve las variables de entorno de todos los contenedores, da 403.
 
 `lab_logs` redacta secretos antes de devolver nada (`app/redact.py`) y marca su
 salida como contenido no confiable, que es la regla 2 aplicada donde toca.

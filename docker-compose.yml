@@ -137,24 +137,27 @@ services:
 
   # ---------------------------------------------------------------- homelab
 
-  # El unico contenedor que ve el socket de Docker. Con POST=0 no hay forma de
-  # arrancar, parar ni borrar nada por este camino: solo lectura, de verdad.
+  # El unico contenedor que ve el socket de Docker. HAProxy con lista blanca por
+  # ruta (config/haproxy.cfg): solo GET y solo seis endpoints de lectura, el
+  # resto 403. tecnativa no sirve: con CONTAINERS=1 concede tambien
+  # /containers/{id}/json, que devuelve las variables de entorno (los secretos)
+  # de todos los contenedores, y su filtro no baja a nivel de ruta.
   # Vive en una red interna sin salida, junto al MCP y con nadie mas.
   docker-socket-proxy:
-    image: tecnativa/docker-socket-proxy:0.3.0
+    image: haproxy:3.0-alpine
     container_name: puente-socket-proxy
     restart: unless-stopped
-    environment:
-      CONTAINERS: 1
-      INFO: 1
-      VERSION: 1
-      PING: 1
-      # Todo lo demas queda en 0 por defecto. POST explicito para que se lea.
-      POST: 0
+    # Sin root: el usuario haproxy de la imagen (uid 99) abre el socket por el
+    # grupo que es su dueno en el host. deploy.sh lo detecta y lo pone en .env.
+    group_add:
+      - "${DOCKER_GID:?define DOCKER_GID en .env (ver .env.example)}"
     volumes:
+      - ./config/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    read_only: true
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:2375/_ping"]
+      # -O /dev/null y no --spider: el proxy solo deja pasar GET.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2375/_ping"]
       interval: 30s
       timeout: 5s
       retries: 3
