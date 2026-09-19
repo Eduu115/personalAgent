@@ -21,6 +21,14 @@ class Settings(BaseSettings):
     database_url: str = "postgresql://puente:puente@postgres:5432/puente"
     redis_url: str = "redis://redis:6379/0"
 
+    homelab_mcp_url: str = "http://homelab-mcp:8000/mcp"
+    # Tope de rondas del bucle de herramientas. Sin esto, un modelo que se
+    # enrosca llamando a la misma herramienta se come el presupuesto de madrugada.
+    max_rondas_herramientas: int = 8
+    # Segundos que se espera a una herramienta: un MCP colgado no puede dejar
+    # colgada la peticion de chat.
+    timeout_herramienta: float = 30.0
+
     litellm_base_url: str = "http://litellm:4000/v1"
     litellm_master_key: str = "sk-cambia-esto"
 

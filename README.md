@@ -84,6 +84,12 @@ curl -N -X POST localhost:8420/api/chat \
 Deberias ver el flujo SSE: `event: start`, varios `event: delta` y un `event: done`
 con el recuento de tokens.
 
+Si la pregunta necesita herramientas ("¿cómo está el server?") aparecen ademas
+parejas de `event: tool` con `estado` `inicio` y `fin` (nombre, argumentos,
+`resultado` y `duracion_ms`). Si el modelo agota las
+`MAX_RONDAS_HERRAMIENTAS` (8) sin terminar, llega un `event: limite` y la
+respuesta lo dice.
+
 ## 4. Exponerlo en el tailnet
 
 ```bash
@@ -237,7 +243,7 @@ docker compose down -v                  # parar y BORRAR las conversaciones
 # psql dentro del contenedor
 docker compose exec postgres psql -U puente -d puente
 
-# el audit log, cuando haya herramientas
+# el audit log: cada llamada a herramienta, rechazos incluidos
 docker compose exec postgres psql -U puente -d puente \
   -c "select requested_at, tool_name, risk, status from tool_calls order by 1 desc limit 20;"
 ```
