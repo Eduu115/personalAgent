@@ -196,7 +196,9 @@ Briefing de las 7:30 funcionando: APScheduler dentro del agente
 sola copia para los dos) con `origin="schedule"`, una conversacion nueva por
 briefing para seguir el hilo, y aviso por un ntfy propio (`deny-all`, un token
 que solo publica y otro que solo lee). Si falla, aviso con prioridad alta.
-`POST /api/briefing` lo lanza a mano. El prompt le prohibe las falsas alarmas
+`POST /api/briefing` lo lanza a mano. Para el iPhone, ntfy usa ntfy.sh de
+`upstream`: a ntfy.sh solo va el id del mensaje y el SHA256 de la URL del
+topic; el contenido se lo baja el movil de nuestro servidor por el tailnet. El prompt le prohibe las falsas alarmas
 de seguridad: no sabe lo que hace su dueno.
 
 Si no pudo consultar algo (un MCP caido, llamadas fallidas), lo dice arriba y

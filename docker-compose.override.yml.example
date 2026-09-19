@@ -19,6 +19,11 @@ services:
     environment:
       BRIEFING_CRON: ""
 
+  # Sin upstream a ntfy.sh: un ntfy de portatil no tiene a quien despertar.
+  ntfy:
+    environment:
+      NTFY_UPSTREAM_BASE_URL: ""
+
   homelab-mcp:
     volumes:
       - type: bind

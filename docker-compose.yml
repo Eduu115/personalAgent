@@ -318,6 +318,15 @@ services:
     environment:
       NTFY_LISTEN_HTTP: ":8080"
       NTFY_BEHIND_PROXY: "true"
+      # Para el iPhone: iOS no deja a la app una conexion abierta, asi que sin
+      # esto las notificaciones de un ntfy propio tardan horas. A ntfy.sh solo
+      # va el id del mensaje y el SHA256 de la URL del topic (comprobado): ntfy.sh
+      # despierta la app por APNs y el iPhone se baja el contenido de AQUI, por
+      # el tailnet. El briefing no sale de casa, que era el motivo de todo esto.
+      NTFY_UPSTREAM_BASE_URL: "https://ntfy.sh"
+      # Con upstream ntfy no arranca sin base-url, y tiene que ser EXACTAMENTE
+      # la URL que se pone en las apps: el SHA256 sale de ella.
+      NTFY_BASE_URL: ${NTFY_BASE_URL:-}
       NTFY_WEB_ROOT: disable
       NTFY_AUTH_FILE: /var/lib/ntfy/auth.db
       NTFY_AUTH_DEFAULT_ACCESS: deny-all

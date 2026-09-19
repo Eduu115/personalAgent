@@ -45,6 +45,8 @@ grep -qE '^REDIS_PASSWORD=.+' .env || fallo "REDIS_PASSWORD vacio en .env: opens
 for t in NTFY_TOKEN_PUBLICAR NTFY_TOKEN_SUSCRIBIR; do
     grep -qE "^$t=tk_[a-z0-9]{29}\$" .env || fallo "$t vacio o mal formado en .env: docker run --rm binwiederhier/ntfy:v2.28.0 token generate"
 done
+# Con upstream (iPhone) ntfy no arranca sin base-url.
+grep -qE '^NTFY_BASE_URL=https://[^/]+[^/]$' .env || fallo "NTFY_BASE_URL vacia o con barra final en .env: la URL de tailscale serve de ntfy, la misma que en las apps"
 # Entre comillas simples o Compose se come los $ del hash y ntfy recibe otro.
 for h in NTFY_PASS_HASH_PUENTE NTFY_PASS_HASH_EDU; do
     grep -qE "^$h='\\\$2[aby]\\\$[0-9]{2}\\\$[./A-Za-z0-9]{53}'\$" .env \
