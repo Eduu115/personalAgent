@@ -131,7 +131,7 @@ def fetch_imap() -> None:
 
 def redaccion() -> None:
     asunto, n = redactar("Tu api_key=sk-abcdefgh12345678 y Authorization: Bearer abc.def.ghi")
-    assert "sk-abcdefgh" not in asunto and n >= 2, asunto
+    assert "sk-abcdefgh" not in asunto and "abc.def.ghi" not in asunto and n >= 2, asunto
     cuerpo, n = redactar("DSN postgresql://app:hunter2secreto@db:5432/x token=eyJhbGciOiJIUzI1.eyJzdWIiOiIx.c2lnbmF0dXJl")
     assert "hunter2" not in cuerpo and "eyJhbGciOiJIUzI1" not in cuerpo, cuerpo
     print("OK redaccion:", asunto, "|", cuerpo)

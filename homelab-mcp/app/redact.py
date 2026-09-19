@@ -19,8 +19,16 @@ import re
 _PATRONES: list[tuple[re.Pattern[str], str]] = [
     # Claves de API con prefijo reconocible (sk-, sk-ant-, ghp_, xoxb-, ...)
     (re.compile(r"\b(sk-[A-Za-z0-9_-]{8,}|ghp_[A-Za-z0-9]{16,}|xox[baprs]-[A-Za-z0-9-]{8,})"), "[REDACTADO:clave]"),
-    # Cabeceras de autorizacion
-    (re.compile(r"(?i)\b(authorization|proxy-authorization)\s*[:=]\s*\S+"), r"\1: [REDACTADO]"),
+    # Cabeceras de autorizacion, con el esquema delante (Bearer, Basic, Token...)
+    # y tambien como clave de un dict o un JSON logueado. Sin el esquema opcional
+    # el valor era la palabra "Bearer" y el token pasaba intacto.
+    (
+        re.compile(
+            r"(?i)\b(authorization|proxy-authorization)[\"']?[ \t]*[:=][ \t]*[\"']?"
+            r"(?:[a-z0-9-]+[ \t]+)?[^\s\"',}]+"
+        ),
+        r"\1: [REDACTADO]",
+    ),
     (re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/-]{12,}=*"), "Bearer [REDACTADO]"),
     # Credenciales dentro de una URL: postgresql://user:password@host
     (re.compile(r"\b([a-z][a-z0-9+.-]*://[^\s:/@]+):[^\s@]+@"), r"\1:[REDACTADO]@"),
@@ -44,3 +52,29 @@ def redactar(texto: str) -> tuple[str, int]:
         texto, n = patron.subn(reemplazo, texto)
         total += n
     return texto, total
+
+
+if __name__ == "__main__":
+    # python -m app.redact: lo que tiene que desaparecer y lo que no.
+    fuera = {
+        "Authorization: Bearer 8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c": "8f7a6b5c",
+        "authorization=Basic dXNlcjpwYXNzd29yZA==": "dXNlcjpw",
+        "Proxy-Authorization: Basic Zm9vOmJhcg==": "Zm9vOmJh",
+        "{'Authorization': 'Bearer 8f7a6b5c4d3e2f1a', 'Accept': 'json'}": "8f7a6b5c",
+        '{"authorization": "Token abcdef123456"}': "abcdef12",
+        "Authorization: 8f7a6b5c4d3e2f1a": "8f7a6b5c",
+        'curl -H "Bearer 8f7a6b5c4d3e2f1a0b9c"': "8f7a6b5c",
+        "OPENAI_API_KEY=sk-abcdefgh12345678": "sk-abcdefgh",
+        "postgresql://app:hunter2secreto@db:5432/x": "hunter2",
+        "jwt eyJhbGciOiJIUzI1.eyJzdWIiOiIx.c2lnbmF0dXJl": "eyJhbGci",
+    }
+    for texto, secreto in fuera.items():
+        limpio, n = redactar(texto)
+        assert secreto not in limpio and n, (texto, limpio)
+    # Lo que no es un secreto se queda como esta.
+    for texto in ("authorization failed for user bob", "{'Accept': 'json'}"):
+        assert redactar(texto) == (texto, 0), (texto, redactar(texto))
+    # Ni el esquema salta de linea ni la redaccion se come las claves siguientes.
+    assert redactar("Authorization: Bearer\nsiguiente linea")[0].endswith("\nsiguiente linea")
+    assert redactar("{'Authorization': 'Bearer 8f7a6b5c4d3e2f1a', 'Accept': 'json'}")[0].endswith("'Accept': 'json'}")
+    print("redact OK:", len(fuera), "secretos fuera")

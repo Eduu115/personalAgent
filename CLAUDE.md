@@ -201,9 +201,7 @@ identidad del tailnet hace de puerta).
   proposito: 40 lineas son mas baratas que compartir contexto de build entre dos
   servidores. Las dos copias lo dicen en su cabecera. Si cambias una, cambia la
   otra. Si llega un tercer servidor que lo necesite, toca paquete comun.
-- **`redact.py` deja pasar el token de `Authorization: Bearer <token>`** (y el
-  de `Basic`): el primer patron se come la palabra `Bearer` como valor y el de
-  Bearer ya no casa. Afecta a las dos copias.
+  `python -m app.redact` comprueba cada copia.
 
 ---
 
