@@ -164,13 +164,24 @@ Madrid, recurrentes resueltas por `recurring-ical-events`, solapes). El buzon se
 abre con `readonly=True` y todo se pide con `BODY.PEEK`: leer un correo no lo
 marca como leido (comprobado contra el buzon real). La URL iCal es una
 credencial y no sale en logs ni en errores. El feed iCal refleja un evento nuevo
-en menos de 8 s y un borrado en 1 s (medido el 19/9); el retraso real es la
-cache de 5 min de `google-mcp`.
+en menos de 8 s y un borrado en 1 s (medido el 19/9), asi que la cache de
+`google-mcp` es de 60 s, que es el unico retraso que queda.
+
+`mail_leer` acorta cada URL a su dominio (`[enlace: click.x.com]`) antes de
+truncar: los enlaces de seguimiento se comian los 4.000 caracteres. Y marca
+`texto_oculto` cuando el HTML esconde texto al lector (display:none,
+visibility:hidden, font-size:0), aunque se lea el text/plain: es donde se
+esconden las inyecciones. Solo ve estilos en linea, no clases de una hoja.
 
 El agente toma herramientas de varios servidores (`config.mcp_servidores`): un
 servidor caido no tumba a los demas, y si dos anuncian el mismo nombre la
-herramienta no se ofrece desde ninguno (ERROR en el log, nada de elegir uno en
-silencio).
+herramienta no se ofrece desde ninguno y `/readyz` da 503 con el conflicto
+(nada de elegir uno en silencio; `deploy.sh` falla con el). Un servidor caido
+sale en `/readyz` como `sin_respuesta`, pero no es un 503: degradar es lo
+previsto.
+
+Redis tiene contrasena (`REDIS_PASSWORD`): comparte la red `puente` con
+`google-mcp`, que parsea el contenido mas hostil del proyecto.
 
 Con esto, "que tengo hoy y que correos importan" y "como esta el server"
 funcionan las dos. Siguiente: el briefing de las 7:30 por ntfy.

@@ -45,16 +45,24 @@ services:
     image: redis:7-alpine
     container_name: puente-redis
     restart: unless-stopped
+    # Con contrasena: comparte la red puente con google-mcp, que es lo que parsea
+    # el contenido mas hostil del proyecto. Va en el comando y no en un sh -c
+    # para no saltarse el entrypoint de la imagen, que baja a usuario redis.
     command: >-
       redis-server
       --save 60 1000
       --maxmemory 64mb
       --maxmemory-policy allkeys-lru
       --appendonly no
+      --requirepass ${REDIS_PASSWORD:?define REDIS_PASSWORD en .env (openssl rand -hex 24)}
+    environment:
+      # redis-cli la toma de aqui: el healthcheck se autentica sin -a en la linea.
+      REDISCLI_AUTH: ${REDIS_PASSWORD}
     volumes:
       - redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      # Con grep y no por el codigo de salida: un NOAUTH tambien sale con 0.
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -81,6 +89,7 @@ services:
       # con 12 hilos agotaria el max_connections=40 de postgres.
       DATABASE_URL: postgresql://${POSTGRES_USER:-puente}:${POSTGRES_PASSWORD}@postgres:5432/litellm?connection_limit=5
       LITELLM_LOG: ${LITELLM_LOG:-ERROR}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
     volumes:
       - ./config/litellm.yaml:/app/config.yaml:ro
     command: ["--config", "/app/config.yaml", "--port", "4000"]
@@ -120,7 +129,7 @@ services:
         condition: service_started
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-puente}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-puente}
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       LITELLM_BASE_URL: http://litellm:4000/v1
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
       SMART_MODEL: ${SMART_MODEL:-smart}

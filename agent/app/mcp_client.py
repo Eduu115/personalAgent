@@ -110,3 +110,12 @@ class Sesion:
             await asyncio.wait_for(self._tarea, 5)
         except Exception as exc:  # TimeoutError incluido: wait_for ya la ha cancelado
             log.debug("cierre de la sesion MCP: %r", _raiz(exc))
+
+
+def sesiones() -> dict[str, Sesion]:
+    """Una sesion perezosa por servidor registrado: no conecta hasta que se usa."""
+    return {nombre: Sesion(url) for nombre, url in settings.mcp_servidores.items()}
+
+
+async def cerrar(sesiones: dict[str, Sesion]) -> None:
+    await asyncio.gather(*(s.cerrar() for s in sesiones.values()))

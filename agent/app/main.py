@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-from . import db
+from . import db, herramientas, mcp_client
 from .config import settings
 from .routes.chat import router as chat_router
 
@@ -50,11 +50,33 @@ async def healthz():
 
 @app.get("/readyz")
 async def readyz():
-    """Readiness: ademas, la base de datos contesta."""
+    """Readiness: la base de datos contesta y ninguna herramienta esta en conflicto.
+
+    Un servidor MCP caido no es un 503: el agente sigue sin sus herramientas, que
+    es lo previsto, y aqui se ve en sin_respuesta. Dos servidores anunciando el
+    mismo nombre si lo es: es un error de despliegue y el ERROR del log no lo
+    lee nadie. deploy.sh pega aqui y falla con el.
+    """
     try:
         ok = await db.ping()
     except Exception as exc:
         return JSONResponse({"status": "error", "db": str(exc)}, status_code=503)
     if not ok:
         return JSONResponse({"status": "error", "db": "sin respuesta"}, status_code=503)
-    return {"status": "ok", "db": "ok", "read_only": settings.read_only}
+
+    sesiones = mcp_client.sesiones()
+    try:
+        catalogo = await herramientas.ofrecidas(sesiones)
+    finally:
+        await mcp_client.cerrar(sesiones)
+    cuerpo = {
+        "status": "error" if catalogo.conflictos else "ok",
+        "db": "ok",
+        "read_only": settings.read_only,
+        "mcp": {
+            "herramientas": len(catalogo.tools),
+            "conflictos": catalogo.conflictos,
+            "sin_respuesta": catalogo.sin_respuesta,
+        },
+    }
+    return JSONResponse(cuerpo, status_code=503 if catalogo.conflictos else 200)
