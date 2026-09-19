@@ -3,10 +3,12 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-from . import db, herramientas, mcp_client
+from . import briefing, db, herramientas, mcp_client
 from .config import settings
 from .routes.chat import router as chat_router
 
@@ -25,9 +27,31 @@ async def lifespan(app: FastAPI):
         settings.smart_model,
         settings.read_only,
     )
+    # En memoria: un solo proceso, y si el agente esta caido a las 7:30 ese
+    # briefing no se recupera al volver. Un cron mal escrito no arranca el agente.
+    planificador = AsyncIOScheduler(timezone=briefing.MADRID)
+    if settings.briefing_cron:
+        planificador.add_job(
+            briefing.lanzar,
+            CronTrigger.from_crontab(settings.briefing_cron, timezone=briefing.MADRID),
+            id="briefing",
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=600,
+        )
+    planificador.start()
+    if settings.briefing_cron:
+        log.info(
+            "briefing programado: '%s' en hora de Madrid, el siguiente %s",
+            settings.briefing_cron,
+            planificador.get_job("briefing").next_run_time,
+        )
+    else:
+        log.info("briefing apagado: BRIEFING_CRON esta vacio")
     try:
         yield
     finally:
+        planificador.shutdown(wait=False)
         await db.close_pool()
 
 
@@ -80,3 +104,13 @@ async def readyz():
         },
     }
     return JSONResponse(cuerpo, status_code=503 if catalogo.conflictos else 200)
+
+
+@app.post("/api/briefing")
+async def briefing_ahora():
+    """Lanza el briefing ya, sin esperar al cron, y espera a que termine.
+
+    Es el mismo que el programado: origin="schedule", conversacion nueva y
+    aviso por ntfy.
+    """
+    return await briefing.lanzar()

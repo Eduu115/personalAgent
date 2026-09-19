@@ -45,6 +45,19 @@ class Settings(BaseSettings):
     history_limit: int = 20
     log_level: str = "INFO"
 
+    # Briefing: cron de 5 campos en hora de Madrid. Vacio, sin briefing: el
+    # override de desarrollo lo apaga para que el portatil no mande uno cada manana.
+    briefing_cron: str = "30 7 * * *"
+    # Si no ha terminado en esto, se da por fallido y se avisa.
+    briefing_timeout: float = 300.0
+    # ntfy propio, por la red puente. El token solo publica en el topic.
+    ntfy_url: str = "http://ntfy:8080"
+    ntfy_topic: str = "briefing"
+    ntfy_token_publicar: str = ""
+    # Para enlazar la conversacion desde la notificacion. Mientras no haya PWA,
+    # el enlace es el JSON de /api/conversations/<id>.
+    agente_url_publica: str = ""
+
     # Kill switch. Con READ_ONLY=true el agente responde pero no ejecuta
     # ninguna herramienta con efectos. Lo vas a usar mas de lo que crees.
     read_only: bool = False

@@ -135,6 +135,25 @@ async def ofrecidas(sesiones: dict[str, Sesion]) -> Catalogo:
     return Catalogo(tools, ruta, conflictos, sin_respuesta)
 
 
+def _bloqueo(riesgo: str, origin: str) -> str | None:
+    """Por que una herramienta de ese nivel no se puede usar desde ese origen, o None.
+
+    Una tarea programada solo lee, tambien cuando en la F2 exista la cola de
+    aprobaciones: a las 7:30 no hay nadie delante para aprobar nada.
+    """
+    if origin != "user" and riesgo != "read":
+        return f"una tarea programada ({origin}) solo puede usar herramientas de lectura"
+    if settings.read_only and riesgo != "read":
+        return "READ_ONLY activo: solo se ejecutan herramientas de lectura"
+    return None
+
+
+def permitida(nombre: str, origin: str) -> bool:
+    """Si se le puede ofrecer al modelo. Una desconocida, nunca."""
+    riesgo = RIESGO.get(nombre)
+    return riesgo is not None and _bloqueo(riesgo, origin) is None
+
+
 def _sobre(nombre: str, estado: str, contenido: str) -> str:
     sobre: dict[str, Any] = {
         "origen": f"herramienta {nombre}",
@@ -175,8 +194,9 @@ async def ejecutar(
     elif riesgo is None:
         status, error = "rejected", f"'{llamada.nombre}' no esta dada de alta en el agente"
         log.warning("el modelo pidio '%s', que no esta en el mapa de riesgo: rechazada", llamada.nombre)
-    elif settings.read_only and riesgo != "read":
-        status, error = "rejected", "READ_ONLY activo: solo se ejecutan herramientas de lectura"
+    elif bloqueo := _bloqueo(riesgo, origin):
+        status, error = "rejected", bloqueo
+        log.warning("'%s' (%s) rechazada para origin=%s: %s", llamada.nombre, riesgo, origin, bloqueo)
     elif llamada.nombre not in ruta:
         # Esta en el mapa pero ahora no la ofrece nadie: su servidor no contesta
         # o dos servidores se pelean por el nombre.

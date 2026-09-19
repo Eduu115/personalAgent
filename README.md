@@ -229,6 +229,61 @@ respuestas IMAP, iCal con recurrentes y excepciones, redaccion):
 docker compose exec google-mcp python -m app.pruebas
 ```
 
+## Briefing de la manana y avisos (ntfy)
+
+Cada dia a las 7:30 (hora de Madrid) el agente prepara un briefing: agenda de
+hoy, correos que importan y una linea sobre el server si algo va raro. Lo deja
+en una conversacion nueva, "Briefing del sabado 20/09", para seguir tirando del
+hilo desde el chat, y avisa al movil por ntfy con un enlace a esa conversacion.
+Si el briefing falla, llega un aviso con prioridad alta en su lugar.
+
+Usa el mismo bucle de herramientas que el chat, con `origin="schedule"`: solo
+herramientas de lectura, tambien cuando llegue la cola de aprobaciones. A las
+7:30 no hay nadie delante para aprobar nada.
+
+Configuracion en `.env` (detalles en `.env.example`):
+
+| Variable | Para que |
+|---|---|
+| `BRIEFING_CRON` | Cuando, en cron de 5 campos y hora de Madrid. Vacio, apagado |
+| `NTFY_TOKEN_PUBLICAR` | Con el que publica el agente. Solo escribe en el topic `briefing` |
+| `NTFY_TOKEN_SUSCRIBIR` | Con el que se suscribe el movil. Solo lee |
+| `AGENTE_URL_PUBLICA` | Base del enlace de la notificacion |
+
+Los tokens se generan con `docker run --rm binwiederhier/ntfy:v2.28.0 token generate`.
+Mientras no haya PWA, el enlace abre el JSON de `/api/conversations/<id>`.
+
+Lanzarlo a mano, sin esperar al cron (espera a que termine y devuelve el texto):
+
+```bash
+curl -s -X POST localhost:8420/api/briefing
+```
+
+### Exponer ntfy al tailnet
+
+ntfy es propio, nada de ntfy.sh: el briefing lleva asuntos de correos. Escucha en
+`127.0.0.1:8423` y lo saca al tailnet `tailscale serve`, como al agente, en el
+8444 (el 443 lo tiene nginx-proxy, ver `CLAUDE.md`):
+
+```bash
+sudo tailscale serve --bg --https=8444 http://127.0.0.1:8423
+```
+
+Todo esta cerrado por defecto (`deny-all`) y la web de ntfy, apagada.
+
+### Suscribirse desde el movil (Android)
+
+Con Tailscale activo en el movil y la app ntfy (Google Play o F-Droid):
+
+1. **Ajustes > Usuarios > Anadir usuario.** Servidor
+   `https://puente.<tailnet>.ts.net:8444`, usuario **vacio** y como contrasena
+   el `NTFY_TOKEN_SUSCRIBIR`. ntfy toma un usuario vacio con un token de
+   contrasena como acceso por token.
+2. **+ > Suscribirse a un tema.** Tema `briefing`, marca *Usar otro servidor* y
+   pon la misma URL.
+3. Activa **Entrega instantanea** en esa suscripcion: con un servidor propio, sin
+   ella la app de Google Play puede tardar en enterarse.
+
 ## Desarrollo en Mac o Windows
 
 El server es Ubuntu y `deploy.sh` es solo para el (usa `ss`, `/proc` y `stat` de
@@ -249,7 +304,9 @@ docker compose ps
 ```
 
 Compose carga `docker-compose.override.yml` solo si existe, y esta en
-`.gitignore`: en el server no se copia y no se aplica.
+`.gitignore`: en el server no se copia y no se aplica. El override tambien apaga
+el briefing de las 7:30: desde un portatil gastaria tokens cada manana para
+avisar por un ntfy que no mira nadie. A mano sigue funcionando.
 
 > **`lab_host` en Docker Desktop devuelve datos de la VM de Linux, no de tu
 > maquina.** macOS no tiene `/proc`: la memoria, la carga y los discos que ves son

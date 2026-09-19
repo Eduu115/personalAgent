@@ -42,6 +42,9 @@ grep -qE '^ANTHROPIC_API_KEY=sk-ant-\.\.\.$' .env && fallo "ANTHROPIC_API_KEY si
 grep -qE '^POSTGRES_PASSWORD=.+' .env || fallo "POSTGRES_PASSWORD vacio en .env"
 grep -qE '^LITELLM_MASTER_KEY=sk-.+' .env || fallo "LITELLM_MASTER_KEY vacio en .env"
 grep -qE '^REDIS_PASSWORD=.+' .env || fallo "REDIS_PASSWORD vacio en .env: openssl rand -hex 24"
+for t in NTFY_TOKEN_PUBLICAR NTFY_TOKEN_SUSCRIBIR; do
+    grep -qE "^$t=tk_[a-z0-9]{29}\$" .env || fallo "$t vacio o mal formado en .env: docker run --rm binwiederhier/ntfy:v2.28.0 token generate"
+done
 
 # En el server no se edita a mano: lo que no esta en git no existe.
 if ! git diff --quiet || ! git diff --cached --quiet; then
@@ -65,6 +68,12 @@ MCP_PORT="$(sed -n 's/^MCP_PORT=//p' .env)"
 MCP_PORT="${MCP_PORT:-8421}"
 if puerto_ocupado "$MCP_PORT" && ! contenedor_vivo puente-homelab-mcp; then
     fallo "el puerto $MCP_PORT esta ocupado por otro proceso: ss -ltnp | grep $MCP_PORT"
+fi
+
+NTFY_PORT="$(sed -n 's/^NTFY_PORT=//p' .env)"
+NTFY_PORT="${NTFY_PORT:-8423}"
+if puerto_ocupado "$NTFY_PORT" && ! contenedor_vivo puente-ntfy; then
+    fallo "el puerto $NTFY_PORT esta ocupado por otro proceso: ss -ltnp | grep $NTFY_PORT"
 fi
 
 GOOGLE_MCP_PORT="$(sed -n 's/^GOOGLE_MCP_PORT=//p' .env)"
@@ -100,7 +109,7 @@ disponible_mib="$(awk '/^MemAvailable:/ {print int($2 / 1024)}' /proc/meminfo)"
 if ! contenedor_vivo puente-litellm && [ "$disponible_mib" -lt 1800 ]; then
     fallo "solo hay ${disponible_mib} MiB disponibles y el primer arranque necesita ~1,8 GiB"
 fi
-echo "OK: rama $RAMA, puertos agente $AGENT_PORT / litellm 4141 / mcp $MCP_PORT / google-mcp $GOOGLE_MCP_PORT, DOCKER_GID $DOCKER_GID, ${disponible_mib} MiB disponibles"
+echo "OK: rama $RAMA, puertos agente $AGENT_PORT / litellm 4141 / mcp $MCP_PORT / google-mcp $GOOGLE_MCP_PORT / ntfy $NTFY_PORT, DOCKER_GID $DOCKER_GID, ${disponible_mib} MiB disponibles"
 
 # ---------------------------------------------------------------- codigo
 

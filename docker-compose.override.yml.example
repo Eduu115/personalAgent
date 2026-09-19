@@ -13,6 +13,12 @@
 # maquina, asi que lab_host devuelve memoria, carga y discos de la VM.
 
 services:
+  # El briefing de las 7:30 no sale de un portatil: cada manana gastaria tokens
+  # y avisaria por un ntfy que no mira nadie. Se lanza a mano con POST /api/briefing.
+  agent:
+    environment:
+      BRIEFING_CRON: ""
+
   homelab-mcp:
     volumes:
       - type: bind
