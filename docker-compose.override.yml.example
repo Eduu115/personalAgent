@@ -1,0 +1,21 @@
+# Solo para desarrollar en Docker Desktop (Mac y Windows). En el server NO.
+#
+#   cp docker-compose.override.yml.example docker-compose.override.yml
+#
+# Compose carga docker-compose.override.yml solo si existe, y esta en
+# .gitignore: en el server no se copia y no se aplica.
+#
+# Docker Desktop no admite propagation: rslave en el bind de /. Compose fusiona
+# los volumenes por destino, asi que esta entrada sustituye entera a la de
+# /hostfs del compose base; /proc se queda como esta.
+#
+# Ojo: / y /proc son los de la VM de Linux de Docker Desktop, no los de tu
+# maquina, asi que lab_host devuelve memoria, carga y discos de la VM.
+
+services:
+  homelab-mcp:
+    volumes:
+      - type: bind
+        source: /
+        target: /hostfs
+        read_only: true

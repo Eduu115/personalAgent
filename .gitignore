@@ -17,3 +17,6 @@ __pycache__/
 .DS_Store
 Thumbs.db
 *.log
+
+# overrides locales de compose (Docker Desktop): ver docker-compose.override.yml.example
+docker-compose.override.yml
