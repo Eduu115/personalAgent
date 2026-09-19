@@ -65,7 +65,8 @@ async def chat(req: ChatRequest):
                     else:
                         pieces.append(ev)
                         yield sse("delta", {"text": ev})
-                assert ronda is not None
+                if ronda is None:
+                    raise RuntimeError("stream_chat ha terminado sin emitir la Ronda final")
                 if ronda.usage:
                     usage.prompt_tokens = (usage.prompt_tokens or 0) + (ronda.usage.prompt_tokens or 0)
                     usage.output_tokens = (usage.output_tokens or 0) + (ronda.usage.output_tokens or 0)
@@ -116,6 +117,16 @@ async def chat(req: ChatRequest):
             raise
         except Exception as exc:
             log.exception("fallo generando la respuesta")
+            # Mismo trato que si corta el cliente: lo generado no se pierde.
+            # Si lo que ha fallado es la base de datos, esto tambien fallara, y
+            # el evento de error tiene que llegar igual.
+            if pieces:
+                try:
+                    await db.add_message(
+                        conversation_id, "assistant", "".join(pieces), model=model
+                    )
+                except Exception:
+                    log.exception("no se pudo guardar la respuesta a medias")
             yield sse("error", {"message": str(exc)})
             return
         finally:
