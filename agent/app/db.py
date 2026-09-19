@@ -140,7 +140,12 @@ async def add_message(
 
 
 async def history(conversation_id: UUID, limit: int) -> list[dict[str, str]]:
-    """Devuelve los ultimos `limit` mensajes en orden cronologico."""
+    """Devuelve los ultimos `limit` mensajes en orden cronologico.
+
+    Solo user y assistant. Un 'tool' releido llegaria a la API sin el assistant
+    con tool_calls que lo justifica y la peticion se rechazaria. Los resultados
+    de herramientas viven en tool_calls y en la peticion en curso, no aqui.
+    """
     async with pool().connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
@@ -149,6 +154,7 @@ async def history(conversation_id: UUID, limit: int) -> list[dict[str, str]]:
                     SELECT role, content, created_at, id
                       FROM messages
                      WHERE conversation_id = %s
+                       AND role IN ('user', 'assistant')
                      ORDER BY created_at DESC, id DESC
                      LIMIT %s
                 ) AS recent
@@ -174,11 +180,7 @@ async def log_tool_call(
     model: str | None = None,
     origin: str = "user",
 ) -> int:
-    """Registra una llamada a herramienta. Append-only, sin excepciones.
-
-    Todavia no hay herramientas, pero la funcion existe para que cuando lleguen
-    no haya la tentacion de "ya lo pongo luego".
-    """
+    """Registra una llamada a herramienta. Append-only, sin excepciones."""
     async with pool().connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(

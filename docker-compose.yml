@@ -112,9 +112,16 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      # started y no healthy: sin MCP el agente sigue respondiendo, solo que sin
+      # herramientas. Un homelab-mcp roto no tiene que tumbar el chat.
+      homelab-mcp:
+        condition: service_started
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-puente}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-puente}
       REDIS_URL: redis://redis:6379/0
+      # Por la red puente. El agente no entra en la red lab: el socket-proxy
+      # solo lo ve homelab-mcp.
+      HOMELAB_MCP_URL: http://homelab-mcp:8000/mcp
       LITELLM_BASE_URL: http://litellm:4000/v1
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
       SMART_MODEL: ${SMART_MODEL:-smart}

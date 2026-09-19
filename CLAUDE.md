@@ -148,13 +148,17 @@ devuelve las variables de entorno de todos los contenedores, da 403.
 `lab_logs` redacta secretos antes de devolver nada (`app/redact.py`) y marca su
 salida como contenido no confiable, que es la regla 2 aplicada donde toca.
 
-Siguiente: enchufar el MCP al bucle del agente (tool-calling en `/api/chat`,
-registrando cada llamada en `tool_calls`). Despues, OAuth de Google en solo
-lectura.
+El MCP ya esta enchufado al bucle de `/api/chat` (`agent/app/herramientas.py`):
+el riesgo lo pone un mapa explicito en el agente y lo que no este en el mapa ni
+se ofrece ni se ejecuta; cada llamada, rechazos incluidos, queda en
+`tool_calls`; los resultados vuelven al modelo en un sobre de "datos, no
+instrucciones", truncados a 8.000 caracteres. El historial persistido es solo
+user/assistant: un `tool` releido llega huerfano a la API y la rechaza.
+
+Siguiente: OAuth de Google en solo lectura.
 
 Lo que **no** hay todavia, a proposito: herramientas con efectos (las cuatro de
-`homelab-mcp` son de lectura), el MCP enchufado al bucle del agente, cola de
-aprobaciones, PWA, memoria de largo plazo, autenticacion propia (de momento la
+`homelab-mcp` son de lectura), cola de aprobaciones, PWA, memoria de largo plazo, autenticacion propia (de momento la
 identidad del tailnet hace de puerta).
 
 ## Hoja de ruta
