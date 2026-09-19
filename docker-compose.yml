@@ -136,6 +136,10 @@ services:
       FAST_MODEL: ${FAST_MODEL:-fast}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       READ_ONLY: ${READ_ONLY:-false}
+      # Sin dos puntos a proposito: BRIEFING_CRON vacio en .env apaga el briefing.
+      BRIEFING_CRON: ${BRIEFING_CRON-30 7 * * *}
+      NTFY_TOKEN_PUBLICAR: ${NTFY_TOKEN_PUBLICAR}
+      AGENTE_URL_PUBLICA: ${AGENTE_URL_PUBLICA:-}
     # El puerto que expone tailscale serve. Solo localhost.
     ports:
       - "127.0.0.1:${AGENT_PORT:-8420}:8000"
@@ -293,6 +297,51 @@ services:
     # ~48 MiB en reposo. El margen es para parsear un correo de 1 MB o un .ics grande.
     mem_limit: 192m
     memswap_limit: 192m
+    networks: [puente]
+    logging: *default-logging
+
+  # ---------------------------------------------------------------- avisos
+
+  # ntfy propio: el briefing lleva asuntos de correos y no sale del tailnet.
+  # Nada de ntfy.sh. Todo cerrado por defecto (deny-all): el agente publica en
+  # el topic briefing con un token que solo escribe, y el movil se suscribe con
+  # otro que solo lee. Usuarios, permisos y tokens se aprovisionan en cada
+  # arranque desde .env, asi que la base de auth vive en un tmpfs y no hay
+  # volumen que cuidar. La web de ntfy, apagada: el movil usa la app.
+  ntfy:
+    image: binwiederhier/ntfy:v2.28.0
+    container_name: puente-ntfy
+    restart: unless-stopped
+    command: ["serve"]
+    user: "1000:1000"
+    environment:
+      NTFY_LISTEN_HTTP: ":8080"
+      NTFY_BEHIND_PROXY: "true"
+      NTFY_WEB_ROOT: disable
+      NTFY_AUTH_FILE: /var/lib/ntfy/auth.db
+      NTFY_AUTH_DEFAULT_ACCESS: deny-all
+      # Hashes bcrypt de contrasenas aleatorias que no se guardaron en ningun
+      # sitio: estos usuarios solo entran por token. No son secretos.
+      NTFY_AUTH_USERS: "puente:$$2a$$10$$dXcjUdfBQsVTGiVPrIs.7uQnuaDlWrhRLZ62E1Q8PyLQ3nti0uVbG:user,edu:$$2a$$10$$CSmhGlHGuuIUf3y.t9mTQOiPlFp6TrVTUBytI/9unIiHealoH94.O:user"
+      NTFY_AUTH_ACCESS: "puente:briefing:wo,edu:briefing:ro"
+      NTFY_AUTH_TOKENS: "puente:${NTFY_TOKEN_PUBLICAR:?define NTFY_TOKEN_PUBLICAR en .env (ver .env.example)}:agente,edu:${NTFY_TOKEN_SUSCRIBIR:?define NTFY_TOKEN_SUSCRIBIR en .env (ver .env.example)}:movil"
+    read_only: true
+    tmpfs:
+      - /var/lib/ntfy:size=8m,mode=1777
+      - /tmp:size=8m
+    security_opt:
+      - no-new-privileges:true
+    # Solo localhost; al tailnet lo saca tailscale serve (README).
+    ports:
+      - "127.0.0.1:${NTFY_PORT:-8423}:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8080/v1/health | grep -q '\"healthy\":true'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    mem_limit: 64m
+    memswap_limit: 64m
     networks: [puente]
     logging: *default-logging
 

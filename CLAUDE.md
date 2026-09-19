@@ -40,6 +40,11 @@ que el modelo se porte bien.
 | `write` | Entra en la cola: push al movil, Edu ve la accion y los argumentos, un toque. Caduca a los 15 min. |
 | `sensitive` | Ademas, la consola muestra el comando exacto, el diff o el cuerpo del correo. |
 
+Una tarea programada (`origin` distinto de `user`, como el briefing) solo puede
+usar nivel `read`, y seguira siendo asi cuando exista la cola: a las 7:30 no hay
+nadie delante para aprobar nada. Esta en la capa de permisos
+(`herramientas._bloqueo`), no en cada tarea.
+
 **4. Audit log desde el dia uno.** Tabla `tool_calls`, append-only (hay un trigger
 que bloquea los DELETE). Cada llamada: que herramienta, con que argumentos, que
 devolvio, quien la pidio, que modelo. No se pospone.
@@ -184,10 +189,20 @@ Redis tiene contrasena (`REDIS_PASSWORD`): comparte la red `puente` con
 `google-mcp`, que parsea el contenido mas hostil del proyecto.
 
 Con esto, "que tengo hoy y que correos importan" y "como esta el server"
-funcionan las dos. Siguiente: el briefing de las 7:30 por ntfy.
+funcionan las dos.
 
-Lo que **no** hay todavia, a proposito: herramientas con efectos (las cuatro de
-`homelab-mcp` son de lectura), cola de aprobaciones, PWA, memoria de largo plazo, autenticacion propia (de momento la
+Briefing de las 7:30 funcionando: APScheduler dentro del agente
+(`BRIEFING_CRON`), el mismo bucle que `/api/chat` (`agent/app/bucle.py`, una
+sola copia para los dos) con `origin="schedule"`, una conversacion nueva por
+briefing para seguir el hilo, y aviso por un ntfy propio (`deny-all`, un token
+que solo publica y otro que solo lee). Si falla, aviso con prioridad alta.
+`POST /api/briefing` lo lanza a mano. El prompt le prohibe las falsas alarmas
+de seguridad: no sabe lo que hace su dueno.
+
+Siguiente: Prometheus + node_exporter + cAdvisor, y Ollama con `nomic-embed-text`.
+
+Lo que **no** hay todavia, a proposito: herramientas con efectos (todas las de
+`homelab-mcp` y `google-mcp` son de lectura), cola de aprobaciones, PWA, memoria de largo plazo, autenticacion propia (de momento la
 identidad del tailnet hace de puerta).
 
 ## Hoja de ruta

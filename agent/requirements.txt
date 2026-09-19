@@ -6,3 +6,4 @@ pydantic>=2.9,<3.0
 pydantic-settings>=2.6,<3.0
 # El mismo pin que homelab-mcp: cliente y servidor hablan la misma version.
 mcp==1.30.0
+apscheduler>=3.11,<4
