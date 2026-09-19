@@ -27,6 +27,16 @@ contenedor_vivo() { [ "$(docker inspect -f '{{.State.Running}}' "$1" 2>/dev/null
 log "comprobaciones previas"
 
 [ -f .env ] || fallo "no hay .env: cp .env.example .env y rellenalo (ver README)"
+
+# El .env lleva los secretos: solo para su dueno. Se comprueba en cada
+# despliegue porque esta barrera ya aparecio caida una vez en el server (664).
+# Con umask 002, cp .env.example .env lo crea asi desde el principio.
+modo="$(stat -c %a .env)"
+if [ "${modo: -2}" != "00" ]; then
+    chmod 600 .env
+    echo "AVISO: .env tenia permisos $modo, accesible por grupo u otros; corregido a 600"
+fi
+
 grep -q $'\r' .env && fallo ".env tiene saltos de linea CRLF: dos2unix .env"
 grep -qE '^ANTHROPIC_API_KEY=sk-ant-\.\.\.$' .env && fallo "ANTHROPIC_API_KEY sigue siendo el placeholder"
 grep -qE '^POSTGRES_PASSWORD=.+' .env || fallo "POSTGRES_PASSWORD vacio en .env"
@@ -63,10 +73,12 @@ fi
 DOCKER_GID="$(sed -n 's/^DOCKER_GID=//p' .env)"
 if [ -z "$DOCKER_GID" ]; then
     DOCKER_GID="$(stat -Lc %g /var/run/docker.sock)"
-    sed -i '/^DOCKER_GID=/d' .env
-    # printf con \n delante: si .env no acaba en salto de linea, echo pegaria
-    # la variable al final de la ultima linea y romperia las dos.
-    printf '\nDOCKER_GID=%s\n' "$DOCKER_GID" >> .env
+    # Con > se trunca y se escribe en el mismo inodo: modo y propietario no
+    # cambian, sin depender de lo que haga sed -i con el fichero nuevo. Sin
+    # temporal en /tmp, que el .env lleva secretos. $(...) se come los saltos
+    # de linea del final: da igual si el .env acababa en uno o no.
+    resto="$(sed '/^DOCKER_GID=/d' .env)"
+    printf '%s\nDOCKER_GID=%s\n' "$resto" "$DOCKER_GID" > .env
     echo "DOCKER_GID=$DOCKER_GID anadido a .env"
 fi
 
