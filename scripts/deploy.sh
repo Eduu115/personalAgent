@@ -37,7 +37,9 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
     fallo "hay cambios locales sin commitear en el server"
 fi
 
-AGENT_PORT="$(grep -E '^AGENT_PORT=' .env | cut -d= -f2)"
+# sed y no grep | cut: si la variable no esta, grep sale con 1 y con set -e y
+# pipefail el script muere en silencio, sin llegar al valor por defecto.
+AGENT_PORT="$(sed -n 's/^AGENT_PORT=//p' .env)"
 AGENT_PORT="${AGENT_PORT:-8420}"
 
 # Un puerto ocupado solo vale si lo tiene nuestro propio contenedor.
@@ -48,14 +50,25 @@ if puerto_ocupado 4141 && ! contenedor_vivo puente-litellm; then
     fallo "el puerto 4141 esta ocupado por otro proceso: ss -ltnp | grep 4141"
 fi
 
-MCP_PORT="$(grep -E '^MCP_PORT=' .env | cut -d= -f2)"
+MCP_PORT="$(sed -n 's/^MCP_PORT=//p' .env)"
 MCP_PORT="${MCP_PORT:-8421}"
 if puerto_ocupado "$MCP_PORT" && ! contenedor_vivo puente-homelab-mcp; then
     fallo "el puerto $MCP_PORT esta ocupado por otro proceso: ss -ltnp | grep $MCP_PORT"
 fi
 
 # El socket de Docker solo lo ve el proxy. Si no esta, homelab-mcp no arranca.
-[ -S /var/run/docker.sock ] || fallo "no existe /var/run/docker.sock" 
+[ -S /var/run/docker.sock ] || fallo "no existe /var/run/docker.sock"
+
+# El proxy corre sin root y abre el socket por el grupo que es su dueno.
+DOCKER_GID="$(sed -n 's/^DOCKER_GID=//p' .env)"
+if [ -z "$DOCKER_GID" ]; then
+    DOCKER_GID="$(stat -Lc %g /var/run/docker.sock)"
+    sed -i '/^DOCKER_GID=/d' .env
+    # printf con \n delante: si .env no acaba en salto de linea, echo pegaria
+    # la variable al final de la ultima linea y romperia las dos.
+    printf '\nDOCKER_GID=%s\n' "$DOCKER_GID" >> .env
+    echo "DOCKER_GID=$DOCKER_GID anadido a .env"
+fi
 
 # Contenedores llamados puente-* que no son de este proyecto compose.
 ajenos="$(docker ps -a --filter 'name=^puente-' \
@@ -68,7 +81,7 @@ disponible_mib="$(awk '/^MemAvailable:/ {print int($2 / 1024)}' /proc/meminfo)"
 if ! contenedor_vivo puente-litellm && [ "$disponible_mib" -lt 1800 ]; then
     fallo "solo hay ${disponible_mib} MiB disponibles y el primer arranque necesita ~1,8 GiB"
 fi
-echo "RAM disponible: ${disponible_mib} MiB"
+echo "OK: rama $RAMA, puertos agente $AGENT_PORT / litellm 4141 / mcp $MCP_PORT, DOCKER_GID $DOCKER_GID, ${disponible_mib} MiB disponibles"
 
 # ---------------------------------------------------------------- codigo
 
@@ -112,23 +125,40 @@ log "verificacion"
 curl -fsS -m 5 "http://127.0.0.1:${AGENT_PORT}/readyz"
 echo
 
-# El socket-proxy tiene que rechazar cualquier escritura. Si esto devolviera
-# 2xx, el proxy estaria mal configurado y el agente podria parar contenedores.
-codigo="$(docker compose exec -T homelab-mcp python -c "
-import urllib.request, urllib.error
-try:
-    urllib.request.urlopen(urllib.request.Request(
-        'http://docker-socket-proxy:2375/containers/x/stop', method='POST'), timeout=5)
-    print('200')
-except urllib.error.HTTPError as e:
-    print(e.code)
-except Exception as e:
-    print('error:', e)
-")"
-case "$codigo" in
-    403|405) echo "socket-proxy: escrituras bloqueadas ($codigo) OK" ;;
-    *) fallo "el socket-proxy NO esta bloqueando las escrituras (devolvio $codigo)" ;;
-esac
+# Una barrera que no se prueba no existe. El socket-proxy solo deja pasar GET a
+# seis rutas; si algo de esto no da 403, el agente podria parar contenedores o
+# leer Config.Env, los secretos de todos. Se prueba contra un contenedor que no
+# existe para que un proxy roto no pare nada de verdad (daria 404, que tambien
+# falla). /containers/json tiene que pasar: un proxy que lo corta todo tambien
+# esta mal.
+docker compose exec -T homelab-mcp python - <<'PY' || fallo "el socket-proxy no se comporta como la lista blanca de config/haproxy.cfg"
+import sys, urllib.error, urllib.request
+
+def codigo(metodo, ruta):
+    req = urllib.request.Request("http://docker-socket-proxy:2375" + ruta, method=metodo)
+    try:
+        return urllib.request.urlopen(req, timeout=5).status
+    except urllib.error.HTTPError as exc:
+        return exc.code
+    except Exception as exc:
+        return f"error: {exc}"
+
+casos = [
+    ("POST", "/containers/no-existe/stop", 403),
+    ("GET", "/containers/no-existe/json", 403),
+    ("GET", "/v1.44/containers/no-existe/json", 403),
+    ("GET", "/containers/no-existe/archive?path=/", 403),
+    ("GET", "/containers/no-existe/export", 403),
+    ("GET", "/containers/json", 200),
+]
+mal = 0
+for metodo, ruta, esperado in casos:
+    obtenido = codigo(metodo, ruta)
+    mal += obtenido != esperado
+    veredicto = "OK" if obtenido == esperado else f"MAL, esperado {esperado}"
+    print(f"socket-proxy: {metodo} {ruta} -> {obtenido} ({veredicto})")
+sys.exit(1 if mal else 0)
+PY
 
 oom=0
 for c in $(docker compose ps -q); do

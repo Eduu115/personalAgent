@@ -137,9 +137,16 @@ Los ojos del asistente sobre el homelab. Cuatro herramientas, todas de lectura:
 | `lab_stats` | Memoria de un contenedor y cuanto le queda para su `mem_limit` |
 | `lab_logs` | Ultimas lineas de un contenedor, con los secretos redactados |
 
-El socket de Docker solo lo ve `docker-socket-proxy`, configurado con `POST=0`:
-por este camino no se puede arrancar, parar ni borrar nada. `deploy.sh` lo
-verifica en cada despliegue lanzando un POST que tiene que ser rechazado.
+El socket de Docker solo lo ve `docker-socket-proxy`, un HAProxy con lista blanca
+en `config/haproxy.cfg`: solo GET y solo `/_ping`, `/info`, `/version`,
+`/containers/json`, `/containers/{id}/logs` y `/containers/{id}/stats`. Todo lo
+demas da 403, incluido `/containers/{id}/json`, que devolveria las variables de
+entorno (los secretos) de todos los contenedores. `deploy.sh` lo verifica en cada
+despliegue: un POST, `json`, `archive` y `export` tienen que dar 403, y el
+despliegue falla si alguno pasa.
+
+Corre sin root; entra al socket por el grupo que es su dueno, `DOCKER_GID` en
+`.env`. `deploy.sh` lo detecta y lo anade si falta.
 
 ### Usarlo desde Claude Code
 
@@ -179,6 +186,33 @@ curl -s localhost:8421/mcp "${H[@]}" -H "mcp-session-id: $SID" \
 
 Tiene que listar las cuatro herramientas. Para llamar a una, el mismo patron con
 `"method":"tools/call","params":{"name":"lab_host","arguments":{}}`.
+
+## Desarrollo en Mac o Windows
+
+El server es Ubuntu y `deploy.sh` es solo para el (usa `ss`, `/proc` y `stat` de
+GNU). En local se levanta a mano, con Docker Desktop.
+
+Docker Desktop no admite `propagation: rslave` en el bind de `/` que usa
+`homelab-mcp`, y sin mas el contenedor no arranca. El override lo quita:
+
+```bash
+cp .env.example .env                  # y rellenalo como en el paso 1
+cp docker-compose.override.yml.example docker-compose.override.yml
+
+# DOCKER_GID: el grupo dueno del socket visto desde la VM (suele ser 0)
+docker run --rm -v /var/run/docker.sock:/s alpine stat -c %g /s
+
+docker compose up -d --build --wait
+docker compose ps
+```
+
+Compose carga `docker-compose.override.yml` solo si existe, y esta en
+`.gitignore`: en el server no se copia y no se aplica.
+
+> **`lab_host` en Docker Desktop devuelve datos de la VM de Linux, no de tu
+> maquina.** macOS no tiene `/proc`: la memoria, la carga y los discos que ves son
+> los de la VM que monta Docker Desktop (unos 8 GiB y `/dev/vda1`). Es lo esperado,
+> no un fallo del calculo. Los datos buenos solo salen en el server.
 
 ## Endpoints
 
