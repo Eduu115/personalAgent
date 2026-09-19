@@ -21,7 +21,13 @@ class Settings(BaseSettings):
     database_url: str = "postgresql://puente:puente@postgres:5432/puente"
     redis_url: str = "redis://redis:6379/0"
 
-    homelab_mcp_url: str = "http://homelab-mcp:8000/mcp"
+    # Servidores MCP de los que el agente toma herramientas: nombre -> URL. Van
+    # por la red puente; el agente no entra en la red lab, el socket-proxy solo
+    # lo ve homelab-mcp. Se puede sobrescribir con MCP_SERVIDORES='{"...": "..."}'.
+    mcp_servidores: dict[str, str] = {
+        "homelab": "http://homelab-mcp:8000/mcp",
+        "google": "http://google-mcp:8000/mcp",
+    }
     # Tope de rondas del bucle de herramientas. Sin esto, un modelo que se
     # enrosca llamando a la misma herramienta se come el presupuesto de madrugada.
     max_rondas_herramientas: int = 8

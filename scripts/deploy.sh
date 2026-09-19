@@ -66,6 +66,12 @@ if puerto_ocupado "$MCP_PORT" && ! contenedor_vivo puente-homelab-mcp; then
     fallo "el puerto $MCP_PORT esta ocupado por otro proceso: ss -ltnp | grep $MCP_PORT"
 fi
 
+GOOGLE_MCP_PORT="$(sed -n 's/^GOOGLE_MCP_PORT=//p' .env)"
+GOOGLE_MCP_PORT="${GOOGLE_MCP_PORT:-8422}"
+if puerto_ocupado "$GOOGLE_MCP_PORT" && ! contenedor_vivo puente-google-mcp; then
+    fallo "el puerto $GOOGLE_MCP_PORT esta ocupado por otro proceso: ss -ltnp | grep $GOOGLE_MCP_PORT"
+fi
+
 # El socket de Docker solo lo ve el proxy. Si no esta, homelab-mcp no arranca.
 [ -S /var/run/docker.sock ] || fallo "no existe /var/run/docker.sock"
 
@@ -93,7 +99,7 @@ disponible_mib="$(awk '/^MemAvailable:/ {print int($2 / 1024)}' /proc/meminfo)"
 if ! contenedor_vivo puente-litellm && [ "$disponible_mib" -lt 1800 ]; then
     fallo "solo hay ${disponible_mib} MiB disponibles y el primer arranque necesita ~1,8 GiB"
 fi
-echo "OK: rama $RAMA, puertos agente $AGENT_PORT / litellm 4141 / mcp $MCP_PORT, DOCKER_GID $DOCKER_GID, ${disponible_mib} MiB disponibles"
+echo "OK: rama $RAMA, puertos agente $AGENT_PORT / litellm 4141 / mcp $MCP_PORT / google-mcp $GOOGLE_MCP_PORT, DOCKER_GID $DOCKER_GID, ${disponible_mib} MiB disponibles"
 
 # ---------------------------------------------------------------- codigo
 

@@ -7,7 +7,7 @@ un token en una URL. Todo eso pasaria intacto al prompt y de ahi al proveedor.
 Esto no es infalible y no pretende serlo: es la ultima red antes de que un
 secreto salga de la maquina. La primera sigue siendo no loguearlos.
 
-GEMELO: google-mcp/app/redact.py es una copia exacta de este fichero. Si cambias
+GEMELO: homelab-mcp/app/redact.py es una copia exacta de este fichero. Si cambias
 uno, cambia el otro. Esta duplicado a proposito (deuda apuntada en CLAUDE.md):
 40 lineas son mas baratas que compartir contexto de build entre dos servidores.
 """

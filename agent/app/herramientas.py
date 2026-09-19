@@ -5,6 +5,10 @@ un mapa explicito. Una herramienta que el MCP anuncie y no este en el mapa ni
 se ofrece al modelo ni se ejecuta si la pide: el dia que homelab-mcp tenga
 lab_restart, el agente se niega hasta que se de de alta aqui a mano.
 
+Las herramientas vienen de varios servidores MCP (config.mcp_servidores). Se
+juntan sus catalogos y se recuerda de cual viene cada una para enrutar la
+llamada. Un servidor caido no tumba a los demas: se ofrece lo que responda.
+
 Todo resultado vuelve al modelo dentro de un sobre que dice que son datos y no
 instrucciones. Lo pone el orquestador para todas por igual (regla 2): no se
 confia en que cada herramienta se acuerde.
@@ -12,11 +16,14 @@ confia en que cada herramienta se acuerde.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
 from typing import Any
 from uuid import UUID
+
+from mcp import types
 
 from . import db
 from .config import settings
@@ -26,10 +33,15 @@ from .mcp_client import Sesion
 log = logging.getLogger(__name__)
 
 RIESGO: dict[str, str] = {
+    # homelab-mcp
     "lab_status": "read",
     "lab_host": "read",
     "lab_stats": "read",
     "lab_logs": "read",
+    # google-mcp
+    "mail_buscar": "read",
+    "mail_leer": "read",
+    "cal_agenda": "read",
 }
 
 # Lo que entra al contexto por llamada. lab_logs con 500 lineas de un
@@ -46,29 +58,59 @@ AVISO = (
 )
 
 _TTL_CATALOGO = 300.0
-_catalogo: list[dict[str, Any]] | None = None
-_catalogo_ts = 0.0
+# Un servidor que no contesta no se reintenta en cada chat: si esta colgado,
+# cada intento se come el timeout entero.
+_TTL_CAIDO = 60.0
+_catalogos: dict[str, tuple[float, list[types.Tool] | None]] = {}
+_avisadas: set[tuple[str, str]] = set()
 
 
-async def ofrecidas(sesion: Sesion) -> list[dict[str, Any]]:
-    """Las herramientas del MCP que estan en el mapa, en formato OpenAI.
-
-    Si homelab-mcp no contesta, el chat sigue sin herramientas.
-    """
-    global _catalogo, _catalogo_ts
-    if _catalogo is not None and time.monotonic() - _catalogo_ts < _TTL_CATALOGO:
-        return _catalogo
+async def _catalogo(servidor: str, sesion: Sesion) -> list[types.Tool]:
+    guardado = _catalogos.get(servidor)
+    if guardado:
+        ts, tools = guardado
+        if time.monotonic() - ts < (_TTL_CATALOGO if tools is not None else _TTL_CAIDO):
+            return tools or []
     try:
-        catalogo = await sesion.listar()
+        tools = await sesion.listar()
+        log.info("catalogo de %s: %s", servidor, ", ".join(t.name for t in tools) or "vacio")
     except Exception as exc:
-        log.warning("sin catalogo de homelab-mcp, el chat sigue sin herramientas: %s", exc)
-        return []
+        log.warning("%s no contesta, sus herramientas no se ofrecen: %s", servidor, exc)
+        tools = None
+    _catalogos[servidor] = (time.monotonic(), tools)
+    return tools or []
 
-    tools = []
-    for h in catalogo:
-        if h.name not in RIESGO:
-            log.warning("homelab-mcp anuncia '%s' y no esta en el mapa de riesgo: no se ofrece", h.name)
+
+async def ofrecidas(sesiones: dict[str, Sesion]) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    """Las herramientas del mapa que anuncian los servidores que responden.
+
+    Devuelve (tools en formato OpenAI, herramienta -> servidor). Si dos
+    servidores anuncian el mismo nombre no se elige uno en silencio: ERROR en el
+    log y la herramienta no se ofrece desde ninguno.
+    """
+    catalogos = await asyncio.gather(*(_catalogo(n, s) for n, s in sesiones.items()))
+
+    anunciantes: dict[str, list[str]] = {}
+    definicion: dict[str, types.Tool] = {}
+    for servidor, catalogo in zip(sesiones, catalogos):
+        for h in catalogo:
+            anunciantes.setdefault(h.name, []).append(servidor)
+            definicion.setdefault(h.name, h)
+
+    tools, ruta = [], {}
+    for nombre, servidores in anunciantes.items():
+        if len(servidores) > 1:
+            log.error(
+                "CONFLICTO: '%s' la anuncian %s. No se ofrece desde ninguno hasta que se "
+                "renombre en uno de ellos.", nombre, " y ".join(servidores),
+            )
             continue
+        if nombre not in RIESGO:
+            if (servidores[0], nombre) not in _avisadas:
+                _avisadas.add((servidores[0], nombre))
+                log.warning("%s anuncia '%s' y no esta en el mapa de riesgo: no se ofrece", servidores[0], nombre)
+            continue
+        h = definicion[nombre]
         tools.append(
             {
                 "type": "function",
@@ -79,9 +121,8 @@ async def ofrecidas(sesion: Sesion) -> list[dict[str, Any]]:
                 },
             }
         )
-    _catalogo, _catalogo_ts = tools, time.monotonic()
-    log.info("herramientas ofrecidas: %s", ", ".join(t["function"]["name"] for t in tools) or "ninguna")
-    return tools
+        ruta[nombre] = servidores[0]
+    return tools, ruta
 
 
 def _sobre(nombre: str, estado: str, contenido: str) -> str:
@@ -100,7 +141,8 @@ def _sobre(nombre: str, estado: str, contenido: str) -> str:
 
 
 async def ejecutar(
-    sesion: Sesion,
+    sesiones: dict[str, Sesion],
+    ruta: dict[str, str],
     llamada: Llamada,
     *,
     conversation_id: UUID,
@@ -125,14 +167,18 @@ async def ejecutar(
         log.warning("el modelo pidio '%s', que no esta en el mapa de riesgo: rechazada", llamada.nombre)
     elif settings.read_only and riesgo != "read":
         status, error = "rejected", "READ_ONLY activo: solo se ejecutan herramientas de lectura"
+    elif llamada.nombre not in ruta:
+        # Esta en el mapa pero ahora no la ofrece nadie: su servidor no contesta
+        # o dos servidores se pelean por el nombre.
+        status, error = "rejected", f"'{llamada.nombre}' no la ofrece ahora ningun servidor MCP disponible"
     elif llamada.argumentos is None:
         # No se ejecuta: el error vuelve al modelo para que corrija y reintente.
         status = "failed"
         error = f"los argumentos no son un objeto JSON valido: {llamada.crudo[:500]!r}"
     else:
         try:
-            fallo, texto = await sesion.invocar(llamada.nombre, llamada.argumentos)
-        except Exception as exc:  # timeout, homelab-mcp caido
+            fallo, texto = await sesiones[ruta[llamada.nombre]].invocar(llamada.nombre, llamada.argumentos)
+        except Exception as exc:  # timeout, servidor caido
             status, error = "failed", str(exc) or type(exc).__name__
         else:
             # JSON compacto: la sangria de homelab-mcp es aire que ocupa contexto.
