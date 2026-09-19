@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str = "postgresql://puente:puente@postgres:5432/puente"
-    redis_url: str = "redis://redis:6379/0"
+    redis_url: str = "redis://:cambia-esto@redis:6379/0"
 
     # Servidores MCP de los que el agente toma herramientas: nombre -> URL. Van
     # por la red puente; el agente no entra en la red lab, el socket-proxy solo

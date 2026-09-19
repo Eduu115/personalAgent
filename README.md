@@ -30,7 +30,8 @@ git clone https://github.com/Eduu115/personalAgent.git puente && cd puente
 cp .env.example .env
 openssl rand -hex 24   # -> POSTGRES_PASSWORD
 openssl rand -hex 24   # -> LITELLM_MASTER_KEY (con el prefijo sk-)
-nano .env              # pega los dos y tu ANTHROPIC_API_KEY
+openssl rand -hex 24   # -> REDIS_PASSWORD
+nano .env              # pega los tres y tu ANTHROPIC_API_KEY
 ```
 
 Revisa `config/litellm.yaml` y confirma que los identificadores de modelo siguen

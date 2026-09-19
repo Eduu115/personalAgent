@@ -49,13 +49,14 @@ async def chat(req: ChatRequest):
         mensajes = [{"role": "system", "content": settings.system_prompt}] + await db.history(
             conversation_id, settings.history_limit
         )
-        sesiones = {n: mcp_client.Sesion(url) for n, url in settings.mcp_servidores.items()}
+        sesiones = mcp_client.sesiones()
         # Solo se persiste el texto de la ultima ronda: las intermedias y los
         # resultados de herramientas se quedan en esta peticion y en tool_calls.
         pieces: list[str] = []
         usage = llm.Usage()
         try:
-            tools, ruta = await herramientas.ofrecidas(sesiones)
+            catalogo = await herramientas.ofrecidas(sesiones)
+            tools, ruta = catalogo.tools, catalogo.ruta
             for ronda_n in itertools.count(1):
                 pieces = []
                 ronda = None
@@ -131,7 +132,7 @@ async def chat(req: ChatRequest):
             return
         finally:
             with anyio.CancelScope(shield=True):
-                await asyncio.gather(*(s.cerrar() for s in sesiones.values()))
+                await mcp_client.cerrar(sesiones)
 
         answer = "".join(pieces)
         if answer:

@@ -20,6 +20,7 @@ import asyncio
 import json
 import logging
 import time
+from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
@@ -81,12 +82,19 @@ async def _catalogo(servidor: str, sesion: Sesion) -> list[types.Tool]:
     return tools or []
 
 
-async def ofrecidas(sesiones: dict[str, Sesion]) -> tuple[list[dict[str, Any]], dict[str, str]]:
+@dataclass
+class Catalogo:
+    tools: list[dict[str, Any]]  # formato OpenAI, lo que se le ofrece al modelo
+    ruta: dict[str, str]  # herramienta -> servidor
+    conflictos: dict[str, list[str]]  # herramienta -> servidores que la anuncian
+    sin_respuesta: list[str]  # servidores que no han contestado
+
+
+async def ofrecidas(sesiones: dict[str, Sesion]) -> Catalogo:
     """Las herramientas del mapa que anuncian los servidores que responden.
 
-    Devuelve (tools en formato OpenAI, herramienta -> servidor). Si dos
-    servidores anuncian el mismo nombre no se elige uno en silencio: ERROR en el
-    log y la herramienta no se ofrece desde ninguno.
+    Si dos servidores anuncian el mismo nombre no se elige uno en silencio:
+    ERROR en el log, no se ofrece desde ninguno y /readyz da 503.
     """
     catalogos = await asyncio.gather(*(_catalogo(n, s) for n, s in sesiones.items()))
 
@@ -97,9 +105,10 @@ async def ofrecidas(sesiones: dict[str, Sesion]) -> tuple[list[dict[str, Any]], 
             anunciantes.setdefault(h.name, []).append(servidor)
             definicion.setdefault(h.name, h)
 
-    tools, ruta = [], {}
+    tools, ruta, conflictos = [], {}, {}
     for nombre, servidores in anunciantes.items():
         if len(servidores) > 1:
+            conflictos[nombre] = servidores
             log.error(
                 "CONFLICTO: '%s' la anuncian %s. No se ofrece desde ninguno hasta que se "
                 "renombre en uno de ellos.", nombre, " y ".join(servidores),
@@ -122,7 +131,8 @@ async def ofrecidas(sesiones: dict[str, Sesion]) -> tuple[list[dict[str, Any]], 
             }
         )
         ruta[nombre] = servidores[0]
-    return tools, ruta
+    sin_respuesta = [n for n in sesiones if _catalogos.get(n, (0.0, None))[1] is None]
+    return Catalogo(tools, ruta, conflictos, sin_respuesta)
 
 
 def _sobre(nombre: str, estado: str, contenido: str) -> str:

@@ -24,7 +24,9 @@ import recurring_ical_events
 from icalendar import Calendar
 
 MADRID = ZoneInfo("Europe/Madrid")
-_TTL = 300.0
+# Google refleja un evento nuevo en menos de 8 s (medido): la cache es el
+# unico retraso que queda, asi que corta.
+_TTL = 60.0
 _cache: dict[str, tuple[float, Calendar]] = {}
 _DIAS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 

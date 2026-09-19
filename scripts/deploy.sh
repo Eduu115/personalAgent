@@ -41,6 +41,7 @@ grep -q $'\r' .env && fallo ".env tiene saltos de linea CRLF: dos2unix .env"
 grep -qE '^ANTHROPIC_API_KEY=sk-ant-\.\.\.$' .env && fallo "ANTHROPIC_API_KEY sigue siendo el placeholder"
 grep -qE '^POSTGRES_PASSWORD=.+' .env || fallo "POSTGRES_PASSWORD vacio en .env"
 grep -qE '^LITELLM_MASTER_KEY=sk-.+' .env || fallo "LITELLM_MASTER_KEY vacio en .env"
+grep -qE '^REDIS_PASSWORD=.+' .env || fallo "REDIS_PASSWORD vacio en .env: openssl rand -hex 24"
 
 # En el server no se edita a mano: lo que no esta en git no existe.
 if ! git diff --quiet || ! git diff --cached --quiet; then

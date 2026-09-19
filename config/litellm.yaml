@@ -33,6 +33,7 @@ litellm_settings:
   cache_params:
     type: redis
     host: redis
+    password: os.environ/REDIS_PASSWORD
     port: 6379
     ttl: 600
 
