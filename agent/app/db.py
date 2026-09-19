@@ -100,6 +100,17 @@ async def list_conversations(limit: int = 50) -> list[dict[str, Any]]:
             return await cur.fetchall()
 
 
+async def hay_briefing_desde(desde: Any) -> bool:
+    """Si ya hay un briefing creado desde esa hora (programado o lanzado a mano)."""
+    async with pool().connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT 1 FROM conversations WHERE title LIKE 'Briefing del %%' AND created_at >= %s LIMIT 1",
+                (desde,),
+            )
+            return await cur.fetchone() is not None
+
+
 async def set_title_if_empty(conversation_id: UUID, title: str) -> None:
     async with pool().connection() as conn:
         async with conn.cursor() as cur:
@@ -114,6 +125,25 @@ async def set_title_if_empty(conversation_id: UUID, title: str) -> None:
 
 
 # ------------------------------------------------------------------ mensajes
+
+
+async def anteponer_a_respuesta(conversation_id: UUID, texto: str) -> None:
+    """Pone `texto` delante de la ultima respuesta del asistente.
+
+    Para avisos que solo se conocen al acabar: el briefing no sabe hasta el
+    final que parte no pudo consultar, y eso tiene que ir arriba.
+    """
+    async with pool().connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                UPDATE messages
+                   SET content = %s || content
+                 WHERE id = (SELECT max(id) FROM messages
+                              WHERE conversation_id = %s AND role = 'assistant')
+                """,
+                (texto, conversation_id),
+            )
 
 
 async def add_message(

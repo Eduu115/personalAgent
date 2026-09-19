@@ -241,6 +241,11 @@ Usa el mismo bucle de herramientas que el chat, con `origin="schedule"`: solo
 herramientas de lectura, tambien cuando llegue la cola de aprobaciones. A las
 7:30 no hay nadie delante para aprobar nada.
 
+Si no ha podido consultar algo, lo dice en la primera linea ("No he podido
+consultar el correo (google-mcp no responde)"), tambien en la notificacion. Si
+el agente estaba parado a las 7:30, el briefing sale al arrancar si no han
+pasado 2 horas, con la hora a la que tocaba.
+
 Configuracion en `.env` (detalles en `.env.example`):
 
 | Variable | Para que |
@@ -269,12 +274,16 @@ ntfy es propio, nada de ntfy.sh: el briefing lleva asuntos de correos. Escucha e
 sudo tailscale serve --bg --https=8444 http://127.0.0.1:8423
 ```
 
-Todo esta cerrado por defecto (`deny-all`) y la web de ntfy, apagada.
+Todo esta cerrado por defecto (`deny-all`) y la web de ntfy, apagada. Esa
+misma URL, sin barra final, va en `NTFY_BASE_URL`: la necesita el iPhone (abajo).
 
-### Suscribirse desde el movil (Android)
+### Los clientes: iPhone y tablet Android
 
-Con Tailscale activo en el movil y la app ntfy (Google Play o F-Droid). La app
-entra al servidor de una de estas dos formas, **y solo de estas dos**:
+Los dos cuentan: el iPhone es el movil del dia a dia y la tablet Android sera la
+consola de casa (F3). Cada uno recibe los avisos de una forma distinta.
+
+**Como entra la app al servidor.** De una de estas dos formas, **y solo de estas
+dos**, en cualquiera de las dos apps:
 
 | Forma | Usuario en la app | Contrasena en la app |
 |---|---|---|
@@ -295,12 +304,48 @@ segunda forma. Comprobado contra el servidor:
 
 Las dos formas dan lo mismo: `edu` solo puede leer el topic `briefing`.
 
-1. **Ajustes > Usuarios > Anadir usuario.** Servidor
-   `https://puente.<tailnet>.ts.net:8444` y una de las dos formas de la tabla.
-2. **+ > Suscribirse a un tema.** Tema `briefing`, marca *Usar otro servidor* y
-   pon la misma URL.
-3. Activa **Entrega instantanea** en esa suscripcion: con un servidor propio, sin
-   ella la app de Google Play puede tardar en enterarse.
+**La URL del servidor en las apps** es `NTFY_BASE_URL`, exactamente: por ejemplo
+`https://puente.<tailnet>.ts.net:8444`, sin barra final. En el iPhone no es un
+detalle, ver abajo.
+
+#### iPhone
+
+iOS no deja a una app mantener una conexion abierta, asi que un ntfy propio no
+puede avisar al iPhone directamente: sin mas, las notificaciones tardan horas.
+Por eso ntfy tiene `upstream-base-url` apuntando a ntfy.sh:
+
+1. El agente publica el briefing en nuestro ntfy.
+2. Nuestro ntfy manda a ntfy.sh **solo** el id del mensaje y el SHA256 de la URL
+   del topic (`https://puente...:8444/briefing`). Ni el titulo ni el texto.
+3. ntfy.sh despierta la app por APNs, y la app se baja el contenido de
+   **nuestro** servidor.
+
+El briefing no sale del tailnet, que era el motivo de autohospedarlo. Dos
+consecuencias:
+
+- **Tailscale tiene que estar conectado en el iPhone** cuando llega el aviso: el
+  contenido se descarga de nuestro servidor en ese momento. Con Tailscale
+  apagado llega el aviso de ntfy.sh, pero la app no puede bajarse el mensaje.
+  Deja activada la VPN a demanda de Tailscale.
+- **`NTFY_BASE_URL` tiene que ser exactamente la URL que pones en la app.** El
+  iPhone se apunta en ntfy.sh con el SHA256 de su URL; si no coincide con la
+  del servidor, nunca le llega nada.
+
+En la app ntfy de la App Store: **Ajustes > Usuarios**, anade el servidor con una
+de las dos formas de arriba. Despues **+**, tema `briefing`, *Usar otro servidor*
+y la misma URL.
+
+#### Tablet Android
+
+La tablet no pasa por ntfy.sh: usa **entrega instantanea**, una conexion propia y
+permanente contra nuestro servidor. Como vive enchufada, la bateria da igual.
+
+1. **Ajustes > Usuarios > Anadir usuario**, con una de las dos formas de arriba.
+2. **+ > Suscribirse a un tema**, tema `briefing`, *Usar otro servidor* y la URL.
+3. Activa **Entrega instantanea** en esa suscripcion.
+4. Quita **ntfy y Tailscale** de la optimizacion de bateria de Android (Ajustes >
+   Aplicaciones > ntfy > Bateria > Sin restricciones, y lo mismo con Tailscale).
+   Si no, el sistema les corta la conexion y los avisos llegan tarde o no llegan.
 
 ### Las contrasenas de ntfy
 

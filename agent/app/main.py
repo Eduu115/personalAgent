@@ -27,17 +27,22 @@ async def lifespan(app: FastAPI):
         settings.smart_model,
         settings.read_only,
     )
-    # En memoria: un solo proceso, y si el agente esta caido a las 7:30 ese
-    # briefing no se recupera al volver. Un cron mal escrito no arranca el agente.
+    # En memoria, un solo proceso. Un cron mal escrito no arranca el agente.
     planificador = AsyncIOScheduler(timezone=briefing.MADRID)
     if settings.briefing_cron:
+        trigger = CronTrigger.from_crontab(settings.briefing_cron, timezone=briefing.MADRID)
         planificador.add_job(
-            briefing.lanzar,
-            CronTrigger.from_crontab(settings.briefing_cron, timezone=briefing.MADRID),
+            briefing.por_cron,
+            trigger,
+            args=[trigger],
             id="briefing",
             max_instances=1,
+            # Dos disparos perdidos no mandan dos briefings seguidos.
             coalesce=True,
-            misfire_grace_time=600,
+            # Si el proceso esta vivo pero llega tarde (el host suspendido, el
+            # bucle bloqueado), sale igual hasta 2 h despues. Un reinicio no lo
+            # cubre esto sino briefing.pendiente(), justo debajo.
+            misfire_grace_time=int(briefing.VENTANA.total_seconds()),
         )
     planificador.start()
     if settings.briefing_cron:
@@ -46,6 +51,9 @@ async def lifespan(app: FastAPI):
             settings.briefing_cron,
             planificador.get_job("briefing").next_run_time,
         )
+        if perdido := await briefing.pendiente(trigger):
+            log.warning("el briefing de las %s no salio (el agente estaba parado): sale ahora", f"{perdido:%H:%M}")
+            planificador.add_job(briefing.lanzar, kwargs={"programado": perdido}, id="briefing-recuperado")
     else:
         log.info("briefing apagado: BRIEFING_CRON esta vacio")
     try:
