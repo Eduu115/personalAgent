@@ -97,7 +97,7 @@ L6  Interfaces        PWA / tablet en kiosko / movil / ntfy
 L5  Entrada           tailscale serve (TLS + identidad del tailnet)
 L4  Nucleo            FastAPI + LangGraph (interrupt -> aprobacion) + scheduler
 L3  Modelos           LiteLLM -> Claude API | Ollama (embeddings)
-L2  Herramientas      servidores MCP: gmail, calendar, homelab, github, hass
+L2  Herramientas      servidores MCP: homelab, google (correo + calendario), github, hass
 L1  Estado            Postgres + pgvector, Redis, audit log
 L0  Red               Tailscale, Docker, secretos con SOPS
 ```
@@ -113,6 +113,7 @@ L0  Red               Tailscale, Docker, secretos con SOPS
 | Authelia (cuando toque), no Authentik | Authentik son 1,4 GB + 3 contenedores. Authelia, 50 MB |
 | Postgres para todo el estado | Ya hay uno; pgvector entra sin anadir servicio |
 | SQL plano, sin ORM | Esquema pequeno, consultas mas legibles |
+| Correo por IMAP y calendario por URL iCal secreta, sin OAuth | OAuth obliga a publicar la app a produccion (si no, el refresh token caduca a los 7 dias), y eso exige politica de privacidad y dominio verificado. Peaje absurdo para un asistente domestico |
 
 ---
 
@@ -155,7 +156,24 @@ se ofrece ni se ejecuta; cada llamada, rechazos incluidos, queda en
 instrucciones", truncados a 8.000 caracteres. El historial persistido es solo
 user/assistant: un `tool` releido llega huerfano a la API y la rechaza.
 
-Siguiente: OAuth de Google en solo lectura.
+`google-mcp` levantado: correo y calendario en solo lectura, en
+`127.0.0.1:8422/mcp`, solo en la red `puente` (necesita salir a Google).
+`mail_buscar` (sintaxis de Gmail con X-GM-RAW, solo metadatos y snippet),
+`mail_leer` (un mensaje, texto plano, 4.000 caracteres) y `cal_agenda` (hora de
+Madrid, recurrentes resueltas por `recurring-ical-events`, solapes). El buzon se
+abre con `readonly=True` y todo se pide con `BODY.PEEK`: leer un correo no lo
+marca como leido (comprobado contra el buzon real). La URL iCal es una
+credencial y no sale en logs ni en errores. El feed iCal refleja un evento nuevo
+en menos de 8 s y un borrado en 1 s (medido el 19/9); el retraso real es la
+cache de 5 min de `google-mcp`.
+
+El agente toma herramientas de varios servidores (`config.mcp_servidores`): un
+servidor caido no tumba a los demas, y si dos anuncian el mismo nombre la
+herramienta no se ofrece desde ninguno (ERROR en el log, nada de elegir uno en
+silencio).
+
+Con esto, "que tengo hoy y que correos importan" y "como esta el server"
+funcionan las dos. Siguiente: el briefing de las 7:30 por ntfy.
 
 Lo que **no** hay todavia, a proposito: herramientas con efectos (las cuatro de
 `homelab-mcp` son de lectura), cola de aprobaciones, PWA, memoria de largo plazo, autenticacion propia (de momento la
@@ -163,7 +181,7 @@ identidad del tailnet hace de puerta).
 
 ## Hoja de ruta
 
-- **F1 — Ojos.** OAuth de Google en solo lectura (Gmail + Calendar), `homelab-mcp`
+- **F1 — Ojos.** Gmail por IMAP y Calendar por iCal, solo lectura, `homelab-mcp`
   con `status` y `logs` via docker-socket-proxy, Prometheus + node_exporter +
   cAdvisor, briefing programado a las 7:30 por ntfy, Ollama con `nomic-embed-text`.
   *Hecho cuando:* "que tengo hoy y que correos importan" y "como esta el server"
@@ -174,6 +192,18 @@ identidad del tailnet hace de puerta).
 - **F3 — La consola.** Dashboard en la tablet, Fully Kiosk, modo ambient, WoL,
   Home Assistant.
 - **F4 —** GitHub/PRs, proactividad, voz, 8B local para resumenes de madrugada.
+
+---
+
+## Deuda conocida
+
+- **`redact.py` esta duplicado** en `homelab-mcp/app/` y `google-mcp/app/`, a
+  proposito: 40 lineas son mas baratas que compartir contexto de build entre dos
+  servidores. Las dos copias lo dicen en su cabecera. Si cambias una, cambia la
+  otra. Si llega un tercer servidor que lo necesite, toca paquete comun.
+- **`redact.py` deja pasar el token de `Authorization: Bearer <token>`** (y el
+  de `Basic`): el primer patron se come la palabra `Bearer` como valor y el de
+  Bearer ya no casa. Afecta a las dos copias.
 
 ---
 

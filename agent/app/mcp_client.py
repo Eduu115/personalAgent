@@ -1,11 +1,12 @@
-"""Cliente MCP del agente: habla con homelab-mcp por streamable HTTP.
+"""Cliente MCP del agente: habla con un servidor MCP por streamable HTTP.
 
-Una sesion por peticion de chat, perezosa: se abre con la primera llamada que
-la necesita, se reutiliza en todas las rondas y se cierra al terminar. Un chat
-que no usa herramientas (con el catalogo en cache) no paga el handshake.
+Una sesion por servidor y peticion de chat, perezosa: se abre con la primera
+llamada que la necesita, se reutiliza en todas las rondas y se cierra al
+terminar. Un chat que no usa herramientas (con el catalogo en cache) no paga el
+handshake.
 
 La sesion vive en su propia tarea y se le habla por una cola. El transporte de
-mcp abre un task group, y si una peticion HTTP falla (homelab-mcp caido o
+mcp abre un task group, y si una peticion HTTP falla (el servidor caido o
 reiniciado) cancela todo lo que envuelve y sale con un ExceptionGroup. Abierta
 dentro del bucle del chat, eso tumbaria la respuesta entera, "hola" incluido.
 En su tarea solo falla la llamada en curso, y el modelo puede contarlo.
@@ -37,13 +38,14 @@ def _raiz(exc: BaseException) -> BaseException:
 
 
 class Sesion:
-    def __init__(self) -> None:
+    def __init__(self, url: str) -> None:
+        self.url = url
         self._pedidos: asyncio.Queue[Pedido | None] = asyncio.Queue()
         self._tarea: asyncio.Task[None] | None = None
 
     async def _servir(self, pedidos: asyncio.Queue[Pedido | None]) -> None:
         timeout = timedelta(seconds=settings.timeout_herramienta)
-        async with streamable_http_client(settings.homelab_mcp_url) as (leer, escribir, _):
+        async with streamable_http_client(self.url) as (leer, escribir, _):
             async with ClientSession(leer, escribir, read_timeout_seconds=timeout) as s:
                 await s.initialize()
                 log.debug("sesion MCP abierta")
@@ -86,8 +88,8 @@ class Sesion:
             return futuro.result()
         futuro.cancel()
         if self._tarea.done():
-            raise ConnectionError(f"homelab-mcp no disponible: {self._causa()}")
-        raise TimeoutError(f"homelab-mcp no ha respondido en {settings.timeout_herramienta:g} s")
+            raise ConnectionError(f"{self.url} no disponible: {self._causa()}")
+        raise TimeoutError(f"{self.url} no ha respondido en {settings.timeout_herramienta:g} s")
 
     async def listar(self) -> list[types.Tool]:
         return (await self._pedir(lambda s: s.list_tools())).tools

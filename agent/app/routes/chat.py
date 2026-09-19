@@ -49,13 +49,13 @@ async def chat(req: ChatRequest):
         mensajes = [{"role": "system", "content": settings.system_prompt}] + await db.history(
             conversation_id, settings.history_limit
         )
-        sesion = mcp_client.Sesion()
+        sesiones = {n: mcp_client.Sesion(url) for n, url in settings.mcp_servidores.items()}
         # Solo se persiste el texto de la ultima ronda: las intermedias y los
         # resultados de herramientas se quedan en esta peticion y en tool_calls.
         pieces: list[str] = []
         usage = llm.Usage()
         try:
-            tools = await herramientas.ofrecidas(sesion)
+            tools, ruta = await herramientas.ofrecidas(sesiones)
             for ronda_n in itertools.count(1):
                 pieces = []
                 ronda = None
@@ -80,7 +80,7 @@ async def chat(req: ChatRequest):
                     # mas queda en tool_calls como rechazado.
                     for llamada in ronda.llamadas:
                         await herramientas.ejecutar(
-                            sesion, llamada, conversation_id=conversation_id, model=model,
+                            sesiones, ruta, llamada, conversation_id=conversation_id, model=model,
                             rechazo=f"tope de {tope} rondas de herramientas agotado",
                         )
                     aviso = (
@@ -99,7 +99,7 @@ async def chat(req: ChatRequest):
                                        "argumentos": argumentos})
                     t0 = time.monotonic()
                     status, sobre = await herramientas.ejecutar(
-                        sesion, llamada, conversation_id=conversation_id, model=model
+                        sesiones, ruta, llamada, conversation_id=conversation_id, model=model
                     )
                     yield sse("tool", {"estado": "fin", "id": llamada.id, "nombre": llamada.nombre,
                                        "argumentos": argumentos, "resultado": status,
@@ -131,7 +131,7 @@ async def chat(req: ChatRequest):
             return
         finally:
             with anyio.CancelScope(shield=True):
-                await sesion.cerrar()
+                await asyncio.gather(*(s.cerrar() for s in sesiones.values()))
 
         answer = "".join(pieces)
         if answer:

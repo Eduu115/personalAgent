@@ -112,16 +112,15 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      # started y no healthy: sin MCP el agente sigue respondiendo, solo que sin
-      # herramientas. Un homelab-mcp roto no tiene que tumbar el chat.
+      # started y no healthy: sin un MCP el agente sigue respondiendo, solo que
+      # sin sus herramientas. Un MCP roto no tiene que tumbar el chat.
       homelab-mcp:
+        condition: service_started
+      google-mcp:
         condition: service_started
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-puente}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-puente}
       REDIS_URL: redis://redis:6379/0
-      # Por la red puente. El agente no entra en la red lab: el socket-proxy
-      # solo lo ve homelab-mcp.
-      HOMELAB_MCP_URL: http://homelab-mcp:8000/mcp
       LITELLM_BASE_URL: http://litellm:4000/v1
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY}
       SMART_MODEL: ${SMART_MODEL:-smart}
@@ -237,6 +236,55 @@ services:
     mem_limit: 256m
     memswap_limit: 256m
     networks: [puente, lab]
+    logging: *default-logging
+
+  # ---------------------------------------------------------------- google
+
+  # Correo por IMAP (contrasena de aplicacion) y calendario por la URL secreta
+  # iCal, solo lectura. Nada de OAuth: ver google-mcp/app/server.py.
+  # Solo en la red puente: necesita salir a Gmail y a Google, y la red lab es
+  # interna y sin salida. Los secretos, solo en este contenedor.
+  google-mcp:
+    build:
+      context: ./google-mcp
+    image: puente/google-mcp:dev
+    container_name: puente-google-mcp
+    restart: unless-stopped
+    environment:
+      GMAIL_USUARIO: ${GMAIL_USUARIO:-}
+      GMAIL_APP_PASSWORD: ${GMAIL_APP_PASSWORD:-}
+      GOOGLE_ICAL_URLS: ${GOOGLE_ICAL_URLS:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    security_opt:
+      - no-new-privileges:true
+    # En localhost, como homelab-mcp, para que Claude Code use el mismo servidor.
+    ports:
+      - "127.0.0.1:${GOOGLE_MCP_PORT:-8422}:8000"
+    healthcheck:
+      # Solo que el servidor responde: la salud de Gmail no es la de este proceso.
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import sys, urllib.request, urllib.error
+          try:
+              urllib.request.urlopen("http://127.0.0.1:8000/mcp", timeout=4)
+          except urllib.error.HTTPError as exc:
+              sys.exit(1 if exc.code >= 500 else 0)
+          except Exception:
+              sys.exit(1)
+      interval: 30s
+      timeout: 8s
+      retries: 5
+      start_period: 15s
+    # ~48 MiB en reposo. El margen es para parsear un correo de 1 MB o un .ics grande.
+    mem_limit: 192m
+    memswap_limit: 192m
+    networks: [puente]
     logging: *default-logging
 
 volumes:

@@ -193,6 +193,41 @@ curl -s localhost:8421/mcp "${H[@]}" -H "mcp-session-id: $SID" \
 Tiene que listar las cuatro herramientas. Para llamar a una, el mismo patron con
 `"method":"tools/call","params":{"name":"lab_host","arguments":{}}`.
 
+## google-mcp
+
+Correo y calendario de Edu, solo lectura. Sin OAuth ni Google Cloud: IMAP con
+contrasena de aplicacion y la URL secreta del calendario en formato iCal (el
+porque, en `CLAUDE.md`).
+
+| Herramienta | Que devuelve |
+|---|---|
+| `mail_buscar` | Correos que casan con una busqueda de Gmail (`is:unread newer_than:2d`, `from:banco`...): id, remitente, asunto, fecha, etiquetas, si esta leido y un snippet. Nunca el cuerpo |
+| `mail_leer` | Un correo por su id: cabeceras, adjuntos y el texto (HTML pasado a texto plano), maximo 4.000 caracteres |
+| `cal_agenda` | Eventos de hoy y los proximos dias de todos los calendarios, en hora de Madrid, con los solapes |
+
+Se configura en `.env` con `GMAIL_USUARIO`, `GMAIL_APP_PASSWORD` y
+`GOOGLE_ICAL_URLS` (como conseguir cada una, en `.env.example`). Sin ellas el
+servidor arranca igual y las herramientas devuelven un error claro.
+
+Lo que no hace, a proposito: ninguna herramienta escribe. El buzon se abre en
+modo solo lectura y todo se pide con `BODY.PEEK`, asi que leer un correo no lo
+marca como leido. Asunto, snippet y cuerpo pasan por la redaccion de secretos y
+`mail_leer` avisa en su propio resultado de que el texto lo ha escrito un
+tercero.
+
+Desde Claude Code, igual que homelab-mcp:
+
+```bash
+claude mcp add --transport http google http://127.0.0.1:8422/mcp
+```
+
+Comprobaciones sin red ni credenciales (parseo de correos feos, cabeceras MIME,
+respuestas IMAP, iCal con recurrentes y excepciones, redaccion):
+
+```bash
+docker compose exec google-mcp python -m app.pruebas
+```
+
 ## Desarrollo en Mac o Windows
 
 El server es Ubuntu y `deploy.sh` es solo para el (usa `ss`, `/proc` y `stat` de
