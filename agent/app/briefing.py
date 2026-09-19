@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
 import httpx
+
+from apscheduler.triggers.cron import CronTrigger
 
 from . import bucle, db, herramientas, mcp_client
 from .config import settings
@@ -27,6 +29,12 @@ MADRID = ZoneInfo("Europe/Madrid")
 _DIAS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 # ntfy corta los mensajes a 4 KB: lo que no quepa sigue en la conversacion.
 _MAX_BYTES = 3800
+# Un briefing que no salio a su hora sale igual si no han pasado mas de esto:
+# un despliegue o un reinicio a las 7:30 no pueden dejar el dia sin briefing.
+VENTANA = timedelta(hours=2)
+# Con mas retraso que esto, el texto lo dice: un resumen de la manana leido a
+# mediodia sin saber de cuando es confunde.
+_RETRASO_AVISABLE = timedelta(minutes=10)
 
 PROMPT = """Prepárame el briefing de hoy. Lo leo en el móvil recién levantado: corto, directo, sin preámbulos ni despedidas.
 
@@ -106,9 +114,42 @@ async def _publicar(
     return True
 
 
-async def lanzar() -> dict[str, Any]:
+def ultimo_disparo(trigger: CronTrigger, ahora: datetime) -> datetime | None:
+    """La ultima hora a la que tocaba el cron, si cae dentro de VENTANA."""
+    t = trigger.get_next_fire_time(None, ahora - VENTANA)
+    ultimo = None
+    while t is not None and t <= ahora:
+        ultimo = t
+        t = trigger.get_next_fire_time(t, t + timedelta(seconds=1))
+    return ultimo
+
+
+async def por_cron(trigger: CronTrigger) -> None:
+    """Lo que ejecuta el cron: sabe a que hora tocaba, por si llega tarde."""
+    await lanzar(programado=ultimo_disparo(trigger, datetime.now(MADRID)))
+
+
+async def pendiente(trigger: CronTrigger) -> datetime | None:
+    """La hora de un briefing que no ha salido y todavia esta a tiempo, o None.
+
+    El planificador vive en memoria: si el agente estaba parado a las 7:30, al
+    arrancar calcula la siguiente para manana y misfire_grace_time no llega a
+    mirar la de hoy. Esto si: si tocaba hace menos de VENTANA y no hay
+    briefing desde entonces, toca ahora.
+    """
+    ultimo = ultimo_disparo(trigger, datetime.now(MADRID))
+    if ultimo is None or await db.hay_briefing_desde(ultimo):
+        return None
+    return ultimo
+
+
+async def lanzar(programado: datetime | None = None) -> dict[str, Any]:
     ahora = datetime.now(MADRID)
-    titulo = f"Briefing del {_DIAS[ahora.weekday()]} {ahora:%d/%m}"
+    dia = programado or ahora
+    titulo = f"Briefing del {_DIAS[dia.weekday()]} {dia:%d/%m}"
+    nota_retraso = None
+    if programado and ahora - programado > _RETRASO_AVISABLE:
+        nota_retraso = f"(Briefing de las {programado:%H:%M}, generado a las {ahora:%H:%M}.)"
     conversation_id = None
     respuesta: str | None = None
     error: str | None = None
@@ -159,12 +200,13 @@ async def lanzar() -> dict[str, Any]:
                 no_consultado.setdefault(area, motivo)
 
         aviso = aviso_no_consultado(no_consultado)
+        prefijo = "\n".join(filter(None, [nota_retraso, aviso]))
         if not error and not respuesta:
             error = "el modelo no ha devuelto texto"
-        elif not error and aviso:
-            await db.anteponer_a_respuesta(conversation_id, aviso + "\n\n")
-            respuesta = f"{aviso}\n\n{respuesta}"
-            if set(_AREAS) <= set(no_consultado):
+        elif not error and prefijo:
+            await db.anteponer_a_respuesta(conversation_id, prefijo + "\n\n")
+            respuesta = f"{prefijo}\n\n{respuesta}"
+            if aviso and set(_AREAS) <= set(no_consultado):
                 # Nada que contar: un briefing vacio no, el aviso de fallo.
                 error = aviso
     except TimeoutError:

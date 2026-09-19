@@ -199,6 +199,13 @@ que solo publica y otro que solo lee). Si falla, aviso con prioridad alta.
 `POST /api/briefing` lo lanza a mano. El prompt le prohibe las falsas alarmas
 de seguridad: no sabe lo que hace su dueno.
 
+Si no pudo consultar algo (un MCP caido, llamadas fallidas), lo dice arriba y
+en la notificacion; si no pudo consultar nada, manda el aviso de fallo. Si el
+agente estaba parado a la hora (un despliegue, un reinicio), el briefing sale al
+arrancar si no han pasado 2 h, y dice a que hora tocaba. Ojo: eso no lo hace
+`misfire_grace_time`, que con el planificador en memoria no ve lo que paso
+mientras el proceso no existia; lo hace `briefing.pendiente()` mirando la base.
+
 Siguiente: Prometheus + node_exporter + cAdvisor, y Ollama con `nomic-embed-text`.
 
 Lo que **no** hay todavia, a proposito: herramientas con efectos (todas las de

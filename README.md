@@ -241,6 +241,11 @@ Usa el mismo bucle de herramientas que el chat, con `origin="schedule"`: solo
 herramientas de lectura, tambien cuando llegue la cola de aprobaciones. A las
 7:30 no hay nadie delante para aprobar nada.
 
+Si no ha podido consultar algo, lo dice en la primera linea ("No he podido
+consultar el correo (google-mcp no responde)"), tambien en la notificacion. Si
+el agente estaba parado a las 7:30, el briefing sale al arrancar si no han
+pasado 2 horas, con la hora a la que tocaba.
+
 Configuracion en `.env` (detalles en `.env.example`):
 
 | Variable | Para que |
