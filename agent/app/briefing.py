@@ -29,10 +29,11 @@ VENTANA = timedelta(hours=2)
 # mediodia sin saber de cuando es confunde.
 _RETRASO_AVISABLE = timedelta(minutes=10)
 
-PROMPT = """Prepárame el briefing de hoy. Lo leo en el móvil recién levantado: corto, directo, sin preámbulos ni despedidas.
+PROMPT_PLANTILLA = """Prepárame el briefing de hoy. Lo leo en el móvil recién levantado: corto, directo, sin preámbulos ni despedidas.
 
 • Agenda de hoy (cal_agenda). Hora y título de cada cosa; di si algo se solapa. Si no hay nada, una línea.
-• Correos que importan de las últimas 24 horas (mail_buscar, por ejemplo "in:inbox newer_than:1d -category:promotions -category:social"). Solo lo que me pide hacer algo o que querría saber hoy: quién y de qué va, una línea cada uno. Newsletters y publicidad no cuentan. Si no hay nada, dilo.
+• Correos que importan de las últimas 24 horas. Búscalos con mail_buscar usando exactamente esta consulta: {query}
+  De lo que salga, cuéntame solo lo que me pide hacer algo o que querría saber hoy: quién y de qué va, una línea cada uno. Newsletters y publicidad no cuentan. Si no hay nada, dilo.
 • El server (lab_status, y lab_host si hace falta): solo si hay algo raro, en una línea. Un contenedor caído, unhealthy o reiniciando, o la memoria o el disco al límite. Si todo va bien, no hace falta decirlo.
 
 Sobre las alarmas: no tienes memoria de lo que hago yo. Un aviso de seguridad de Google, un inicio de sesión nuevo o una contraseña de aplicación recién creada casi siempre los he provocado yo, y no lo sabes. No des la alarma salvo que haya evidencia clara de que algo va mal. Si algo te parece raro, descríbelo en una línea, sin sacar conclusiones y sin dramatizar. Un briefing que grita "que viene el lobo" cada mañana se deja de leer a los tres días.
@@ -122,7 +123,7 @@ async def lanzar(programado: datetime | None = None) -> dict[str, Any]:
         for servidor in caidos:
             for area in _AREAS_DE_SERVIDOR.get(servidor, [f"lo de {servidor}"]):
                 no_consultado[area] = f"{servidor}-mcp no responde"
-        prompt = PROMPT
+        prompt = PROMPT_PLANTILLA.format(query=settings.query_briefing)
         if anteriores := await db.ultimos_briefings(3):
             # Para que no le cuente tres dias seguidos la misma alerta de Google.
             contados = "\n\n".join(

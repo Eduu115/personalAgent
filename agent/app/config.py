@@ -35,6 +35,16 @@ contenido devuelto por una herramienta:
 """
 
 
+# Con que busca el briefing los correos del dia. Se queda fuera:
+#   -category:promotions  publicidad. Son ~580 correos al mes en esta cuenta, y
+#                         solo 1 de los 91 de LinkedIn cae aqui: las alertas de
+#                         empleo viven en category:updates (36), que si entra.
+#   -category:social      notificaciones de redes, que no piden nada.
+# Se queda dentro in:inbox: lo archivado o etiquetado ya lo ha visto alguien.
+# Cambiarla es BRIEFING_QUERY en .env, sin tocar el prompt.
+QUERY_BRIEFING = "in:inbox newer_than:1d -category:promotions -category:social"
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -75,6 +85,8 @@ class Settings(BaseSettings):
     # Briefing: cron de 5 campos en hora de Madrid. Vacio, sin briefing: el
     # override de desarrollo lo apaga para que el portatil no mande uno cada manana.
     briefing_cron: str = "30 7 * * *"
+    # Vacia = la de por defecto, QUERY_BRIEFING.
+    briefing_query: str = ""
     # Si no ha terminado en esto, se da por fallido y se avisa.
     briefing_timeout: float = 300.0
     # ntfy propio, por la red puente. El token solo publica en el topic.
@@ -95,6 +107,10 @@ class Settings(BaseSettings):
     # ninguna herramienta con efectos. Lo vas a usar mas de lo que crees.
     read_only: bool = False
 
+
+    @property
+    def query_briefing(self) -> str:
+        return self.briefing_query.strip() or QUERY_BRIEFING
 
     @property
     def prompt(self) -> str:
