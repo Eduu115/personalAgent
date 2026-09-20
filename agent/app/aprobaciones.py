@@ -41,7 +41,7 @@ _QUE_PASA = {
 }
 
 
-def _que_pasa(fila: dict[str, Any]) -> str:
+def que_pasa(fila: dict[str, Any]) -> str:
     plantilla = _QUE_PASA.get(fila["tool_name"], "Es una acción con efectos.")
     try:
         return plantilla.format(**(fila["arguments"] or {}))
@@ -129,7 +129,7 @@ async def encolar(
         [
             _detalle(fila),
             "",
-            _que_pasa(fila),
+            que_pasa(fila),
             f"Caduca a las {caduca}. Si caduca, no se hace nada.",
         ]
     )

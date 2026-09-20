@@ -244,6 +244,36 @@ respuestas IMAP, iCal con recurrentes y excepciones, redaccion):
 docker compose exec google-mcp python -m app.pruebas
 ```
 
+## La consola
+
+Abre la URL del agente en el tailnet (`https://puente.<tailnet>.ts.net:8443/`) y
+ahi esta: tres columnas, pensadas para la tablet en horizontal, y apiladas en el
+movil.
+
+| Vista | Que hace |
+|---|---|
+| Aprobaciones | La cola pendiente, con lo que va a pasar en cristiano, los argumentos y el tiempo que queda. Aprobar y rechazar desde ahi, que en la notificacion del movil no siempre se puede |
+| Estado | Un tile por contenedor con color segun su salud, mas RAM, discos y carga del anfitrion. Se refresca cada 15 s |
+| Chat | Lo mismo que `/api/chat`, pintando ademas los eventos que ya emitia y no veia nadie: las herramientas mientras se ejecutan, lo que entra en la cola y las conversaciones bloqueadas |
+
+Es JS plano servido por el propio agente: sin framework, sin compilacion, sin
+Node y sin contenedor nuevo. Son tres ficheros en `agent/consola/`.
+
+**Instalarla en la tablet o en el movil**: abrela en el navegador y "Anadir a
+la pantalla de inicio". El service worker esta solo para que se pueda instalar;
+**no cachea nada**, a proposito: una cola de aprobaciones de hace media hora es
+peor que no verla.
+
+Dos endpoints la alimentan, y los dos son de solo lectura:
+
+```bash
+curl -s localhost:8420/api/aprobaciones   # lo que espera un OK
+curl -s localhost:8420/api/estado         # contenedores y anfitrion, sin pasar por el modelo
+```
+
+La puerta sigue siendo la identidad del tailnet, la misma que la de `/api/chat`:
+la consola no tiene login propio.
+
 ## Aprobaciones: las herramientas que escriben
 
 `mail_borrador` y `lab_reiniciar` no se ejecutan solas. Cuando el modelo pide

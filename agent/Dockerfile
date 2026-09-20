@@ -10,6 +10,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
+COPY consola ./consola
 
 # Sin root. El agente no necesita privilegios y no los tendra.
 RUN useradd --system --uid 10001 --no-create-home agent \

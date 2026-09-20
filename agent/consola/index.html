@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Puente de mando</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icono-192.png">
+<meta name="theme-color" content="#0f1216">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<style>
+/* La tablet es horizontal y fija: se disena para eso y el movil es la version
+   reducida, no al reves. */
+:root {
+  --fondo: #0f1216; --panel: #161b22; --borde: #232a33; --texto: #e6edf3;
+  --suave: #93a1b1; --ok: #3fb950; --mal: #f85149; --ojo: #d29922; --acento: #7dd3fc;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; height: 100vh; overflow: hidden; background: var(--fondo); color: var(--texto);
+  font: 15px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  display: grid; grid-template-rows: auto 1fr; padding-top: env(safe-area-inset-top);
+}
+header {
+  display: flex; align-items: center; gap: 12px; padding: 10px 16px;
+  border-bottom: 1px solid var(--borde); background: var(--panel);
+}
+header h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: .3px; }
+#reloj { margin-left: auto; color: var(--suave); font-variant-numeric: tabular-nums; }
+.punto { width: 9px; height: 9px; border-radius: 50%; background: var(--suave); }
+.punto.ok { background: var(--ok); } .punto.mal { background: var(--mal); }
+
+main { display: grid; grid-template-columns: 1.15fr 1fr 1.25fr; gap: 12px; padding: 12px; min-height: 0; }
+section { background: var(--panel); border: 1px solid var(--borde); border-radius: 10px; display: flex; flex-direction: column; min-height: 0; }
+section > h2 {
+  font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--suave);
+  margin: 0; padding: 12px 14px 8px; display: flex; gap: 8px; align-items: center;
+}
+section > h2 .cuenta { background: var(--borde); border-radius: 10px; padding: 1px 8px; color: var(--texto); }
+.cuerpo { overflow-y: auto; padding: 0 14px 14px; flex: 1; min-height: 0; }
+.vacio { color: var(--suave); padding: 18px 2px; }
+
+/* --- aprobaciones --- */
+.ficha { border: 1px solid var(--borde); border-radius: 10px; padding: 12px; margin-bottom: 10px; background: #12171e; }
+.ficha.sensitive { border-left: 3px solid var(--ojo); }
+.ficha .nombre { font-weight: 600; }
+.ficha .riesgo { font-size: 11px; color: var(--suave); text-transform: uppercase; letter-spacing: .6px; }
+.ficha .pasa { margin: 8px 0; }
+.ficha pre {
+  background: #0d1117; border: 1px solid var(--borde); border-radius: 8px; padding: 8px;
+  margin: 8px 0; font-size: 12.5px; white-space: pre-wrap; word-break: break-word; max-height: 190px; overflow: auto;
+}
+.queda { color: var(--suave); font-variant-numeric: tabular-nums; }
+.queda.poco { color: var(--ojo); }
+.botones { display: flex; gap: 8px; margin-top: 10px; }
+button {
+  font: inherit; border-radius: 8px; border: 1px solid var(--borde); background: #1d242d; color: var(--texto);
+  padding: 10px 14px; cursor: pointer; min-height: 44px; flex: 1;
+}
+button:hover:not(:disabled) { border-color: var(--acento); }
+button:disabled { opacity: .55; cursor: default; }
+button.si { background: #17351f; border-color: #2b5a34; }
+button.no { background: #35191a; border-color: #5a2b2b; }
+.resuelta { color: var(--suave); padding-top: 8px; }
+
+/* --- estado --- */
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.tile { border: 1px solid var(--borde); border-left: 3px solid var(--suave); border-radius: 8px; padding: 8px 10px; background: #12171e; }
+.tile.ok { border-left-color: var(--ok); } .tile.mal { border-left-color: var(--mal); }
+.tile.ojo { border-left-color: var(--ojo); } .tile.off { opacity: .55; }
+.tile .n { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tile .e { font-size: 12px; color: var(--suave); }
+.medidas { margin: 14px 0 6px; }
+.barra { height: 8px; background: #0d1117; border-radius: 5px; overflow: hidden; margin: 4px 0 10px; }
+.barra > div { height: 100%; background: var(--acento); }
+.barra > div.alta { background: var(--ojo); } .barra > div.critica { background: var(--mal); }
+.etiqueta { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--suave); }
+
+/* --- chat --- */
+#hilo { display: flex; flex-direction: column; gap: 8px; }
+.msg { padding: 9px 12px; border-radius: 10px; max-width: 92%; white-space: pre-wrap; word-wrap: break-word; }
+.msg.yo { background: #1d3040; align-self: flex-end; }
+.msg.el { background: #12171e; border: 1px solid var(--borde); align-self: flex-start; }
+.evento { font-size: 12.5px; color: var(--suave); align-self: flex-start; padding-left: 2px; }
+.evento.aviso { color: var(--ojo); }
+.evento.error { color: var(--mal); }
+form { display: flex; gap: 8px; padding: 10px 14px 14px; border-top: 1px solid var(--borde); }
+textarea {
+  flex: 1; resize: none; font: inherit; background: #0d1117; color: var(--texto);
+  border: 1px solid var(--borde); border-radius: 8px; padding: 10px; min-height: 46px; max-height: 120px;
+}
+form button { flex: 0 0 auto; }
+
+@media (max-width: 900px) {
+  body { overflow: auto; height: auto; min-height: 100vh; }
+  main { grid-template-columns: 1fr; height: auto; }
+  section { max-height: 80vh; }
+}
+</style>
+</head>
+<body>
+<header>
+  <span class="punto" id="pulso"></span>
+  <h1>Puente de mando</h1>
+  <span id="reloj"></span>
+</header>
+
+<main>
+  <section>
+    <h2>Aprobaciones <span class="cuenta" id="n-aprob">0</span></h2>
+    <div class="cuerpo" id="aprobaciones"><p class="vacio">Cargando…</p></div>
+  </section>
+
+  <section>
+    <h2>Estado <span class="cuenta" id="n-cont">—</span></h2>
+    <div class="cuerpo" id="estado"><p class="vacio">Cargando…</p></div>
+  </section>
+
+  <section>
+    <h2>Chat</h2>
+    <div class="cuerpo" id="hilo"></div>
+    <form id="formulario">
+      <textarea id="entrada" placeholder="Escribe y pulsa Enter…" rows="1"></textarea>
+      <button type="submit" id="enviar">Enviar</button>
+    </form>
+  </section>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const crear = (etiqueta, clase, texto) => {
+  const e = document.createElement(etiqueta);
+  if (clase) e.className = clase;
+  if (texto !== undefined) e.textContent = texto;   // textContent: nada de HTML de fuera
+  return e;
+};
+const pulso = (bien) => $("#pulso").className = "punto " + (bien ? "ok" : "mal");
+
+// ---------------------------------------------------------------- aprobaciones
+let pendientes = [];
+const resueltas = new Map();   // id -> texto, para que la ficha no desaparezca de golpe
+
+function cuentaAtras(segundos) {
+  const m = Math.floor(segundos / 60), s = Math.max(0, Math.round(segundos % 60));
+  return `quedan ${m}:${String(s).padStart(2, "0")}`;
+}
+
+function pintarAprobaciones() {
+  const caja = $("#aprobaciones");
+  caja.replaceChildren();
+  $("#n-aprob").textContent = pendientes.length;
+  if (!pendientes.length && !resueltas.size) {
+    caja.append(crear("p", "vacio", "Nada esperando. Todo lo que el agente quiera hacer aparecerá aquí."));
+    return;
+  }
+  for (const p of pendientes) {
+    const ficha = crear("div", "ficha " + p.riesgo);
+    const cabecera = crear("div");
+    cabecera.append(crear("span", "nombre", p.herramienta), " ", crear("span", "riesgo", p.riesgo));
+    ficha.append(cabecera, crear("div", "pasa", p.que_pasa));
+    ficha.append(crear("pre", null, JSON.stringify(p.argumentos, null, 1)));
+
+    const queda = crear("div", "queda");
+    queda.dataset.caduca = p.caduca_en;
+    ficha.append(queda);
+
+    if (resueltas.has(p.id)) {
+      ficha.append(crear("div", "resuelta", resueltas.get(p.id)));
+    } else {
+      const botones = crear("div", "botones");
+      for (const [accion, etiqueta, clase] of [["aprobar", "Aprobar", "si"], ["rechazar", "Rechazar", "no"]]) {
+        const b = crear("button", clase, etiqueta);
+        b.onclick = () => resolver(p, accion, botones);
+        botones.append(b);
+      }
+      ficha.append(botones);
+    }
+    caja.append(ficha);
+  }
+  refrescarCuentas();
+}
+
+function refrescarCuentas() {
+  for (const e of document.querySelectorAll(".queda[data-caduca]")) {
+    const segundos = (new Date(e.dataset.caduca) - Date.now()) / 1000;
+    e.textContent = segundos > 0 ? cuentaAtras(segundos) : "caducada";
+    e.classList.toggle("poco", segundos > 0 && segundos < 120);
+  }
+}
+
+async function resolver(p, accion, botones) {
+  // Tres estados visibles: reposo, enviando, resuelto.
+  for (const b of botones.querySelectorAll("button")) b.disabled = true;
+  const boton = botones.querySelector(accion === "aprobar" ? ".si" : ".no");
+  const original = boton.textContent;
+  boton.textContent = "Enviando…";
+  try {
+    const r = await fetch(`/api/aprobaciones/${p.id}/${accion}?n=${encodeURIComponent(p.nonce)}`, { method: "POST" });
+    const datos = await r.json();
+    resueltas.set(p.id, r.ok
+      ? (accion === "aprobar" ? "Aprobado. Ejecutándose; te aviso al terminar." : "Rechazado. No se ha ejecutado nada.")
+      : `No se ha podido: ${datos.motivo || r.status}`);
+  } catch (e) {
+    resueltas.set(p.id, `No se ha podido: ${e}`);
+    boton.textContent = original;
+  }
+  pintarAprobaciones();
+  setTimeout(() => { resueltas.delete(p.id); cargarAprobaciones(); }, 4000);
+}
+
+async function cargarAprobaciones() {
+  try {
+    const r = await fetch("/api/aprobaciones");
+    pendientes = (await r.json()).pendientes;
+    pulso(true);
+  } catch (e) {
+    pulso(false);
+  }
+  pintarAprobaciones();
+}
+
+// ---------------------------------------------------------------- estado
+function claseSalud(c) {
+  if (c.estado !== "running") return "off";
+  if (c.salud === "healthy") return "ok";
+  if (c.salud === "unhealthy") return "mal";
+  if (c.salud === "starting" || c.detalle?.includes("Restarting")) return "ojo";
+  return "";
+}
+
+function barra(caja, titulo, usado, total, unidad, pct) {
+  const etiqueta = crear("div", "etiqueta");
+  etiqueta.append(crear("span", null, titulo), crear("span", null, `${usado} / ${total} ${unidad} (${pct}%)`));
+  const barra = crear("div", "barra");
+  const relleno = crear("div", pct > 90 ? "critica" : pct > 75 ? "alta" : "");
+  relleno.style.width = Math.min(100, pct) + "%";
+  barra.append(relleno);
+  caja.append(etiqueta, barra);
+}
+
+async function cargarEstado() {
+  const caja = $("#estado");
+  let datos;
+  try {
+    const r = await fetch("/api/estado");
+    datos = await r.json();
+    if (!r.ok) throw new Error(datos.error || r.status);
+    pulso(true);
+  } catch (e) {
+    pulso(false);
+    caja.replaceChildren(crear("p", "vacio", "No se puede leer el estado: " + e.message));
+    return;
+  }
+  caja.replaceChildren();
+  $("#n-cont").textContent = `${datos.docker.en_marcha}/${datos.docker.contenedores}`;
+
+  const tiles = crear("div", "tiles");
+  const orden = { mal: 0, ojo: 1, ok: 2, "": 3, off: 4 };
+  const lista = [...datos.contenedores].sort((a, b) => orden[claseSalud(a)] - orden[claseSalud(b)]);
+  for (const c of lista.slice(0, 40)) {
+    const t = crear("div", "tile " + claseSalud(c));
+    t.append(crear("div", "n", c.nombre), crear("div", "e", c.salud || c.estado));
+    t.title = `${c.imagen} — ${c.detalle}`;
+    tiles.append(t);
+  }
+  caja.append(tiles);
+
+  const medidas = crear("div", "medidas");
+  const m = datos.host.memoria;
+  barra(medidas, "RAM", Math.round(m.usado_mib / 1024 * 10) / 10, Math.round(m.total_mib / 1024 * 10) / 10, "GiB", m.usado_pct);
+  for (const d of datos.host.discos) {
+    barra(medidas, `Disco ${d.punto_montaje}`, Math.round(d.total_gib - d.libre_gib), Math.round(d.total_gib), "GiB", d.usado_pct);
+  }
+  const carga = datos.host.carga;
+  const linea = crear("div", "etiqueta");
+  linea.append(crear("span", null, "Carga"), crear("span", null, `${carga.load_1m} (${carga.carga_por_nucleo_1m}/núcleo)`));
+  medidas.append(linea);
+  caja.append(medidas);
+}
+
+// ---------------------------------------------------------------- chat
+let conversacion = null;
+const hilo = () => $("#hilo");
+const alFinal = () => hilo().scrollTop = hilo().scrollHeight;
+
+function evento(texto, clase) {
+  hilo().append(crear("div", "evento " + (clase || ""), texto));
+  alFinal();
+}
+
+async function enviar(texto) {
+  hilo().append(crear("div", "msg yo", texto));
+  alFinal();
+  $("#enviar").disabled = true;
+  let burbuja = null;
+  const enCurso = new Map();
+  try {
+    // EventSource solo sabe GET, y esto es un POST: se lee el stream a mano.
+    const r = await fetch("/api/chat", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ message: texto, conversation_id: conversacion }),
+    });
+    const lector = r.body.getReader(), dec = new TextDecoder();
+    let buffer = "", corte;
+    while (true) {
+      const { done, value } = await lector.read();
+      if (done) break;
+      buffer += dec.decode(value, { stream: true });
+      while ((corte = buffer.indexOf("\n\n")) >= 0) {
+        const bloque = buffer.slice(0, corte);
+        buffer = buffer.slice(corte + 2);
+        let nombre = "message", datos = "";
+        for (const linea of bloque.split("\n")) {
+          if (linea.startsWith("event: ")) nombre = linea.slice(7);
+          else if (linea.startsWith("data: ")) datos += linea.slice(6);
+        }
+        const d = datos ? JSON.parse(datos) : {};
+        if (nombre === "start") {
+          conversacion = d.conversation_id;
+        } else if (nombre === "delta") {
+          if (!burbuja) { burbuja = crear("div", "msg el", ""); hilo().append(burbuja); }
+          burbuja.textContent += d.text;
+          alFinal();
+        } else if (nombre === "tool") {
+          if (d.estado === "inicio") {
+            const e = crear("div", "evento", `⚙ ${d.nombre}…`);
+            hilo().append(e); enCurso.set(d.id, e); alFinal();
+          } else {
+            const e = enCurso.get(d.id) || crear("div", "evento", "");
+            const marca = { executed: "✓", failed: "✕", rejected: "⛔", pending: "⏸" }[d.resultado] || "";
+            e.textContent = `⚙ ${d.nombre} ${marca} ${d.duracion_ms} ms`;
+            if (!e.parentNode) hilo().append(e);
+          }
+        } else if (nombre === "aprobacion") {
+          evento(`⏸ ${d.herramienta} espera tu OK (${d.riesgo}). Mira la columna de la izquierda.`, "aviso");
+          cargarAprobaciones();
+        } else if (nombre === "bloqueada") {
+          evento(`⏸ Hay algo pendiente de aprobar: ${d.herramienta}.`, "aviso");
+          cargarAprobaciones();
+        } else if (nombre === "limite") {
+          evento(`Se cortó tras ${d.rondas} rondas de herramientas.`, "aviso");
+        } else if (nombre === "error") {
+          evento("Error: " + d.message, "error");
+        }
+      }
+    }
+  } catch (e) {
+    evento("Se ha cortado: " + e, "error");
+  }
+  $("#enviar").disabled = false;
+  $("#entrada").focus();
+}
+
+$("#formulario").onsubmit = (e) => {
+  e.preventDefault();
+  const texto = $("#entrada").value.trim();
+  if (!texto) return;
+  $("#entrada").value = "";
+  enviar(texto);
+};
+$("#entrada").onkeydown = (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("#formulario").requestSubmit(); }
+};
+
+// ---------------------------------------------------------------- arranque
+const reloj = () => $("#reloj").textContent = new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
+reloj(); setInterval(reloj, 10000);
+setInterval(refrescarCuentas, 1000);
+cargarAprobaciones(); setInterval(cargarAprobaciones, 10000);
+cargarEstado(); setInterval(cargarEstado, 15000);
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js");
+</script>
+</body>
+</html>

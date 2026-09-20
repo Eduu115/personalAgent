@@ -333,6 +333,21 @@ async def pendiente_de(conversation_id: UUID) -> dict[str, Any] | None:
             return await cur.fetchone()
 
 
+async def pendientes() -> list[dict[str, Any]]:
+    """Todo lo que espera un OK y no ha caducado, para la consola."""
+    async with pool().connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT *, EXTRACT(EPOCH FROM (expires_at - now())) AS quedan_seg
+                  FROM tool_calls
+                 WHERE status = 'pending' AND expires_at > now()
+                 ORDER BY id
+                """
+            )
+            return await cur.fetchall()
+
+
 async def llamada(tool_call_id: int) -> dict[str, Any] | None:
     async with pool().connection() as conn:
         async with conn.cursor() as cur:
