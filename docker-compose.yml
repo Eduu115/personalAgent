@@ -138,6 +138,8 @@ services:
       READ_ONLY: ${READ_ONLY:-false}
       # Sin dos puntos a proposito: BRIEFING_CRON vacio en .env apaga el briefing.
       BRIEFING_CRON: ${BRIEFING_CRON-30 7 * * *}
+      # Vacia: la de por defecto, que esta en config.py con el porque.
+      BRIEFING_QUERY: ${BRIEFING_QUERY-}
       NTFY_TOKEN_PUBLICAR: ${NTFY_TOKEN_PUBLICAR}
       # La abren los botones del push de aprobacion desde el movil.
       PUENTE_BASE_URL: ${PUENTE_BASE_URL:-}

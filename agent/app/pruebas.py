@@ -195,6 +195,23 @@ async def candados_memoria() -> None:
         (db.log_tool_call, memoria.guardar, memoria.olvidar) = original
 
 
+def query_del_briefing() -> None:
+    """La consulta de correo del briefing sale de configuracion, no del prompt."""
+    from . import briefing
+    from .config import QUERY_BRIEFING, settings
+
+    assert "-category:promotions" in QUERY_BRIEFING, "el filtro de publicidad no esta en la de por defecto"
+    original = settings.briefing_query
+    try:
+        assert settings.query_briefing == QUERY_BRIEFING, "sin BRIEFING_QUERY tiene que valer la de por defecto"
+        settings.briefing_query = "in:inbox otra-cosa"
+        prompt = briefing.PROMPT_PLANTILLA.format(query=settings.query_briefing)
+        assert "in:inbox otra-cosa" in prompt and QUERY_BRIEFING not in prompt, "el prompt no coge la configurada"
+    finally:
+        settings.briefing_query = original
+    print(f"OK consulta del briefing desde configuracion: {settings.query_briefing}")
+
+
 def rutas() -> None:
     """Las rutas que abren los botones del push siguen existiendo."""
     caminos = {r.path for r in main.app.routes}
@@ -213,6 +230,7 @@ def rutas() -> None:
 if __name__ == "__main__":
     referencias()
     identidad()
+    query_del_briefing()
     rutas()
     asyncio.run(catalogo_propio())
     asyncio.run(candados_memoria())
