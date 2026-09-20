@@ -139,6 +139,62 @@ def identidad() -> None:
     print(f"OK identidad en el prompt: {settings.dueno}, {settings.gmail_usuario or '(sin correo)'}, {settings.zona_horaria}")
 
 
+async def catalogo_propio() -> None:
+    """El catalogo sale sin servidores MCP: las herramientas del propio agente."""
+    from . import herramientas
+
+    catalogo = await herramientas.ofrecidas({})
+    nombres = {t["function"]["name"] for t in catalogo.tools}
+    assert nombres == herramientas.PROPIAS, f"sin MCP tendrian que quedar {herramientas.PROPIAS}, hay {nombres}"
+    assert all(catalogo.ruta[n] == "agente" for n in nombres), catalogo.ruta
+    assert not catalogo.conflictos
+    print(f"OK catalogo sin MCP: {', '.join(sorted(nombres))}")
+
+
+async def candados_memoria() -> None:
+    """Escribir en memoria: solo en turnos del usuario y sin contenido externo.
+
+    Un hecho guardado entra en el prompt todos los dias: si un correo pudiera
+    dejar uno, seria una inyeccion de prompt con efecto permanente.
+    """
+    from . import db, herramientas, llm, memoria
+
+    auditado: list[tuple[str, str, str | None]] = []
+
+    async def log_falso(nombre, **kw):
+        auditado.append((nombre, kw["status"], kw.get("error")))
+        return 1
+
+    async def no_guardar(*_a, **_k):
+        raise AssertionError("no tendria que haber llegado a guardar")
+
+    original = (db.log_tool_call, memoria.guardar, memoria.olvidar)
+    db.log_tool_call, memoria.guardar, memoria.olvidar = log_falso, no_guardar, no_guardar
+    try:
+        ruta = {n: "agente" for n in herramientas.PROPIAS}
+        guardar = llm.Llamada("m1", "memoria_guardar", "{}", {"texto": "prueba", "ambito": "perfil"})
+        olvidar = llm.Llamada("m2", "memoria_olvidar", "{}", {"id": 1})
+        casos = [
+            ("el briefing (origin=schedule)", guardar, {"origin": "schedule"}),
+            ("un turno que ya leyo algo de fuera", guardar, {"contenido_externo": True}),
+            ("olvidar desde el briefing", olvidar, {"origin": "schedule"}),
+            ("olvidar tras leer algo de fuera", olvidar, {"contenido_externo": True}),
+        ]
+        for titulo, llamada, extra in casos:
+            r = await herramientas.ejecutar(
+                {}, ruta, llamada, conversation_id=None, model="prueba", **extra
+            )
+            assert r.status == "rejected", f"{titulo}: status={r.status}"
+            assert r.pendiente is None, f"{titulo}: no puede acabar en la cola"
+        assert [e[1] for e in auditado] == ["rejected"] * len(casos), auditado
+        # Y que se le ofrecen al modelo solo cuando toca.
+        assert not herramientas.permitida("memoria_guardar", "schedule")
+        assert herramientas.permitida("memoria_guardar", "user")
+        print(f"OK candados de memoria: {len(casos)} intentos rechazados y auditados")
+    finally:
+        (db.log_tool_call, memoria.guardar, memoria.olvidar) = original
+
+
 def rutas() -> None:
     """Las rutas que abren los botones del push siguen existiendo."""
     caminos = {r.path for r in main.app.routes}
@@ -158,5 +214,7 @@ if __name__ == "__main__":
     referencias()
     identidad()
     rutas()
+    asyncio.run(catalogo_propio())
+    asyncio.run(candados_memoria())
     asyncio.run(arranque())
     print("todo OK")

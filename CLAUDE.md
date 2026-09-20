@@ -60,6 +60,13 @@ por delante. Con limites, el que se pasa muere solo.
 del agente. El mismo `homelab-mcp` lo consume este agente, Claude Desktop y Claude
 Code. Se escribe la integracion una vez.
 
+Unica excepcion, razonada, desde la F2: las tres herramientas de memoria
+(`memoria_listar`, `memoria_guardar`, `memoria_olvidar`). No tocan ningun
+sistema de fuera, sino la propia base del agente, y su candado principal (no
+escribir en un turno que haya visto contenido externo) vive en el orquestador y
+no en la herramienta. Un servidor MCP para ellas seria un contenedor mas con las
+credenciales de Postgres para tres funciones. Ver "Memoria".
+
 **7. El modelo de permisos protege al agente, no a las herramientas de
 desarrollo.** Los niveles de riesgo, la cola y el socket-proxy acotan lo que
 puede hacer *el agente*, que es un modelo leyendo contenido no confiable sin
@@ -89,8 +96,8 @@ Consecuencias practicas:
 - **El bucle del agente va a la API, no a local.** Un 8B cuantizado se pierde
   encadenando tres llamadas a herramientas, y Pascal sin tensor cores tarda ~10 s en
   procesar 4.000 tokens de contexto.
-- **Lo unico que va en local son los embeddings** (`nomic-embed-text` en Ollama,
-  ~500 MB de VRAM). Llega en la F1.
+- **De momento no corre nada en local**: la memoria son dos tablas y no hace
+  falta ni Ollama ni embeddings (ver la revision en las decisiones).
 - **Los puertos 80 y 443 estan ocupados por nginx-proxy** (sirve APIArena). Por eso
   todo aqui se publica en `127.0.0.1` y quien expone el agente es `tailscale serve`.
 
@@ -118,6 +125,7 @@ L0  Red               Tailscale, Docker, secretos con SOPS
 | `tailscale serve` en vez de Caddy | Cert automatico, cero contenedores, 80/443 ocupados |
 | Authelia (cuando toque), no Authentik | Authentik son 1,4 GB + 3 contenedores. Authelia, 50 MB |
 | Postgres para todo el estado | Ya hay uno; pgvector entra sin anadir servicio |
+| ~~Memoria en pgvector con embeddings~~ **revisado el 20/9/2026: dos tablas normales** | Los hechos duraderos sobre una persona son decenas de lineas y caben enteros en el prompt. Buscar por similitud resuelve un problema que todavia no tenemos, y habria costado Ollama, un modelo de embeddings y ~500 MB de VRAM para elegir entre treinta frases. El codigo avisa con un WARNING cuando el bloque se acerca a su tope: **ese** es el dia de meter embeddings |
 | SQL plano, sin ORM | Esquema pequeno, consultas mas legibles |
 | Correo por IMAP y calendario por URL iCal secreta, sin OAuth | OAuth obliga a publicar la app a produccion (si no, el refresh token caduca a los 7 dias), y eso exige politica de privacidad y dominio verificado. Peaje absurdo para un asistente domestico |
 
@@ -288,13 +296,15 @@ que un job diario vacia el contenido de las filas de mas de 30 dias
 
 - **F1 — Ojos.** Gmail por IMAP y Calendar por iCal, solo lectura, `homelab-mcp`
   con `status` y `logs` via docker-socket-proxy, Prometheus + node_exporter +
-  cAdvisor, briefing programado a las 7:30 por ntfy, Ollama con `nomic-embed-text`.
+  cAdvisor, briefing programado a las 7:30 por ntfy. ~~Ollama con `nomic-embed-text`~~:
+  no hace falta, la memoria no usa embeddings.
   *Hecho cuando:* "que tengo hoy y que correos importan" y "como esta el server"
   funcionan las dos.
 - **F2 — Manos.** ~~LangGraph~~ cola de aprobaciones sobre `bucle.py` **(hecho)**,
   push con botones **(hecho)**, primeras escrituras: `mail_borrador` y
-  `lab_reiniciar` **(hecho)**; kill switch real **(hecho)**. Faltan: eventos de
-  calendario, `lab.update_stack` y la memoria en pgvector.
+  `lab_reiniciar` **(hecho)**; kill switch real **(hecho)**; memoria
+  **(hecha, sin pgvector: ver la revision)**. Faltan: eventos de calendario y
+  `lab.update_stack`.
 - **F3 — La consola.** Dashboard en la tablet, Fully Kiosk, modo ambient, WoL,
   Home Assistant.
 - **F4 —** GitHub/PRs, proactividad, voz, 8B local para resumenes de madrugada.
@@ -327,6 +337,38 @@ configuracion y no escrito en el codigo (`config.Settings.prompt`):
 El bloque dice explicitamente que eso es configuracion del sistema y por tanto
 instrucciones, no contenido devuelto por una herramienta (regla 2). Sin esto, a
 un "hazme un borrador para mi mismo" el agente tenia que preguntar la direccion.
+
+## Memoria
+
+Dos cosas distintas, dos tablas (migracion 003):
+
+- **`briefings`**: cada briefing que sale, con su resumen. Al preparar el
+  siguiente se le meten los tres ultimos con la instruccion de no repetir lo que
+  ya conto salvo que haya cambiado. Esto solo arregla el falso positivo del 19:
+  te cuenta la alerta de Google el primer dia y al siguiente ya sabe que te la
+  conto.
+- **`hechos`**: lo que Edu ha dicho de si mismo, por ambito (perfil,
+  preferencia, proyecto, contexto), con caducidad opcional. Entran en el prompt
+  agrupados y marcados como datos, no ordenes. Olvidar es `vigente = false`:
+  aqui no se borran filas. `origen` tiene un CHECK que solo admite 'usuario': la
+  base se niega a guardar un hecho que no venga de el, y el dia que queramos
+  hechos deducidos por el agente sera una migracion deliberada.
+
+Las tres herramientas las sirve el agente (excepcion a la regla 6). Escribir en
+memoria no pasa por la cola de aprobaciones, pero tiene dos candados:
+
+1. Solo en turnos con `origin = "user"`. El briefing no puede escribir jamas.
+2. **Nunca en un turno en el que ya haya entrado contenido de fuera.** En cuanto
+   se ejecuta cualquier herramienta que no sea de memoria, se marca el turno y
+   las de escritura dejan de ofrecerse; si el modelo insiste, `ejecutar()` las
+   rechaza y queda auditado. El motivo: una memoria persistente es una inyeccion
+   de prompt con efecto permanente. Un correo que consiga escribir un hecho esta
+   en el prompt todos los dias a partir de entonces. Se pierde algun caso
+   legitimo ("lee este correo y recuerda que...") a cambio de cerrar esa puerta;
+   el usuario siempre puede decirlo en un mensaje nuevo.
+
+Cada escritura y cada olvido publican un push en `aprobaciones`, sin botones:
+para enterarse y poder pedir que se borre.
 
 ## Convenciones
 

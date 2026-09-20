@@ -26,7 +26,7 @@ from uuid import UUID
 
 from mcp import types
 
-from . import aprobaciones, db
+from . import aprobaciones, db, memoria
 from .config import settings
 from .llm import Llamada
 from .mcp_client import Sesion
@@ -46,7 +46,19 @@ RIESGO: dict[str, str] = {
     # Escrituras: no se ejecutan, se encolan y esperan un OK (aprobaciones.py).
     "mail_borrador": "write",
     "lab_reiniciar": "sensitive",
+    # Memoria: las sirve el propio agente contra su base, no un MCP.
+    "memoria_listar": "read",
+    "memoria_guardar": "write",
+    "memoria_olvidar": "write",
 }
+
+# Las que no vienen de ningun servidor MCP: las ejecuta el agente. Escribir
+# memoria no pasa por la cola (no toca nada de fuera), pero lleva dos candados
+# propios: solo turnos del usuario y solo si el turno no ha visto contenido
+# externo. Un hecho guardado esta en el prompt todos los dias: una memoria
+# persistente es una inyeccion de prompt con efecto permanente.
+PROPIAS = {"memoria_listar", "memoria_guardar", "memoria_olvidar"}
+MEMORIA_ESCRIBE = {"memoria_guardar", "memoria_olvidar"}
 
 # Lo que entra al contexto por llamada. lab_logs con 500 lineas de un
 # contenedor hablador se comeria el contexto y el presupuesto.
@@ -108,8 +120,18 @@ async def ofrecidas(sesiones: dict[str, Sesion]) -> Catalogo:
             anunciantes.setdefault(h.name, []).append(servidor)
             definicion.setdefault(h.name, h)
 
-    tools, ruta, conflictos = [], {}, {}
+    # Las propias van primero: si un MCP anunciara una con el mismo nombre, es
+    # un conflicto y gana no ofrecer la del MCP. Quien filtra por origen es el
+    # bucle, con permitida(): aqui van todas.
+    tools = list(memoria.DEFINICIONES)
+    ruta = {d["function"]["name"]: "agente" for d in tools}
+    conflictos: dict[str, list[str]] = {}
     for nombre, servidores in anunciantes.items():
+        if nombre in PROPIAS:
+            conflictos[nombre] = ["agente", *servidores]
+            log.error("CONFLICTO: '%s' la sirve el agente y la anuncia %s: se ignora la del MCP",
+                      nombre, " y ".join(servidores))
+            continue
         if len(servidores) > 1:
             conflictos[nombre] = servidores
             log.error(
@@ -191,6 +213,15 @@ class Resultado:
     pendiente: dict[str, Any] | None = None  # la fila en cola, si status == "pending"
 
 
+async def _propia(nombre: str, argumentos: dict[str, Any], conversation_id: UUID) -> dict[str, Any]:
+    """Las herramientas que sirve el agente: la memoria, contra su propia base."""
+    if nombre == "memoria_listar":
+        return await memoria.listar()
+    if nombre == "memoria_guardar":
+        return await memoria.guardar(**argumentos, conversation_id=conversation_id)
+    return await memoria.olvidar(**argumentos)
+
+
 async def ejecutar(
     sesiones: dict[str, Sesion],
     ruta: dict[str, str],
@@ -200,12 +231,18 @@ async def ejecutar(
     model: str,
     rechazo: str | None = None,
     origin: str = "user",
+    contenido_externo: bool = False,
 ) -> Resultado:
     """Decide, ejecuta y audita una llamada.
 
     `rechazo` la bloquea sin mirar nada mas (p. ej. el tope de rondas).
     `origin` es quien dio la orden: "user" desde la consola, "schedule" las
     tareas programadas como el briefing de las 7:30.
+
+    `contenido_externo` dice si en este turno ya ha entrado contenido de fuera
+    (un correo, un calendario, unos logs). Si ha entrado, no se escribe en
+    memoria: si no, bastaria un correo que dijera "recuerda que..." para dejar
+    algo en el prompt de todos los dias.
     """
     riesgo = RIESGO.get(llamada.nombre)
     resultado: Any = None
@@ -227,6 +264,22 @@ async def ejecutar(
         # No se ejecuta: el error vuelve al modelo para que corrija y reintente.
         status = "failed"
         error = f"los argumentos no son un objeto JSON valido: {llamada.crudo[:500]!r}"
+    elif llamada.nombre in MEMORIA_ESCRIBE and contenido_externo:
+        status, error = "rejected", (
+            "en este turno ya ha entrado contenido de fuera (un correo, un calendario, unos logs), "
+            "asi que no se escribe en memoria. Si Edu quiere guardarlo, que te lo diga en un mensaje "
+            "nuevo, sin consultar nada antes."
+        )
+        log.warning("memoria bloqueada en un turno con contenido externo: %s", llamada.nombre)
+    elif llamada.nombre in PROPIAS:
+        try:
+            datos = await _propia(llamada.nombre, llamada.argumentos, conversation_id)
+        except Exception as exc:
+            status, error = "failed", str(exc) or type(exc).__name__
+        else:
+            status = "executed"
+            texto = json.dumps(datos, ensure_ascii=False, separators=(",", ":"), default=str)
+            resultado = para_guardar(texto, datos)
     elif riesgo != "read":
         # Una escritura no se ejecuta aqui: se encola y espera el OK de Edu. La
         # fila la crea la cola, asi que esta salida no pasa por log_tool_call.
