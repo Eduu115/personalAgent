@@ -2,16 +2,19 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from . import aprobaciones, briefing, db, herramientas, mcp_client
 from .config import settings
 from .routes.aprobaciones import router as aprobaciones_router
 from .routes.chat import router as chat_router
+from .routes.consola import router as consola_router
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),
@@ -86,6 +89,8 @@ app = FastAPI(
 
 app.include_router(chat_router)
 app.include_router(aprobaciones_router)
+app.include_router(consola_router)
+
 
 
 @app.get("/healthz")
@@ -136,3 +141,7 @@ async def briefing_ahora():
     aviso por ntfy.
     """
     return await briefing.lanzar()
+
+# La consola, al final: JS plano servido tal cual, sin build ni Node. Va montada
+# en la raiz, asi que se registra DESPUES de las rutas de la API.
+app.mount("/", StaticFiles(directory=Path(__file__).parent.parent / "consola", html=True), name="consola")

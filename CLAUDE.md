@@ -305,8 +305,9 @@ que un job diario vacia el contenido de las filas de mas de 30 dias
   `lab_reiniciar` **(hecho)**; kill switch real **(hecho)**; memoria
   **(hecha, sin pgvector: ver la revision)**; `lab_update_stack` por el helper
   del host **(hecho)**. Falta: eventos de calendario.
-- **F3 — La consola.** Dashboard en la tablet, Fully Kiosk, modo ambient, WoL,
-  Home Assistant.
+- **F3 — La consola.** Dashboard en la tablet **(primera version hecha:
+  aprobaciones, estado y chat)**. Faltan: Fully Kiosk, modo ambient, briefing en
+  la consola, acciones rapidas, WoL y Home Assistant.
 - **F4 —** GitHub/PRs, proactividad, voz, 8B local para resumenes de madrugada.
 
 ---
@@ -402,6 +403,30 @@ componente del proyecto fuera del sandbox, y estos son sus limites:
 
 Sin vuelta atras automatica: la respuesta trae los digests de ANTES y acaban en
 la notificacion, para que revertir sea un comando y no una investigacion.
+
+## La consola (F3, primera version)
+
+`agent/consola/`: un HTML con su CSS y su JS, un manifest y un service worker,
+servidos como estaticos por el propio FastAPI (`app.mount` al final del todo,
+detras de las rutas de la API: montarlo antes se come `/healthz` y deja el
+contenedor unhealthy). Sin framework, sin compilacion, sin Node y sin
+contenedor nuevo.
+
+Tres vistas: aprobaciones (resolver desde la tablet, que es lo que no se puede
+hacer siempre desde la notificacion), estado (tiles por contenedor y medidas del
+anfitrion) y chat (que ademas pinta los eventos `tool`, `aprobacion`,
+`bloqueada` y `limite`, que ya se emitian y no veia nadie).
+
+Dos endpoints nuevos, los dos de lectura:
+
+- `GET /api/aprobaciones`: las pendientes vivas, con su nonce. Viaja a la pagina
+  porque es lo que autoriza el boton, igual que viaja en la URL del push. La
+  puerta sigue siendo la identidad del tailnet: no hay sesion propia.
+- `GET /api/estado`: `lab_status` + `lab_host` directos del MCP, con cache de
+  5 s. **No pasa por el modelo**: pintar tiles con un `docker ps` no vale tokens.
+  Tampoco se auditan en `tool_calls`: es un sondeo cada 15 s, no una accion.
+
+El service worker existe solo para que sea instalable y no cachea nada.
 
 ## Convenciones
 

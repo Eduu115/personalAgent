@@ -212,12 +212,34 @@ def query_del_briefing() -> None:
     print(f"OK consulta del briefing desde configuracion: {settings.query_briefing}")
 
 
+def consola() -> None:
+    """La consola se sirve y NO se ha comido las rutas de la API.
+
+    Montar los estaticos en "/" antes de /healthz deja el contenedor unhealthy
+    para siempre: paso al escribirla.
+    """
+    from fastapi.testclient import TestClient
+
+    cliente = TestClient(main.app)
+    assert cliente.get("/healthz").status_code == 200, "el montaje de la consola tapa /healthz"
+    pagina = cliente.get("/")
+    assert pagina.status_code == 200 and "Puente de mando" in pagina.text, "no se sirve la consola"
+    for fichero in ("/manifest.webmanifest", "/sw.js", "/icono-192.png", "/icono-512.png"):
+        assert cliente.get(fichero).status_code == 200, f"falta {fichero}"
+    ultima = main.app.routes[-1]
+    assert getattr(ultima, "name", None) == "consola", (
+        f"la ultima ruta es {ultima!r}: el montaje de la consola tiene que ir el ultimo o tapa la API")
+    print("OK consola: pagina, manifest, service worker e iconos; /healthz intacto")
+
+
 def rutas() -> None:
     """Las rutas que abren los botones del push siguen existiendo."""
     caminos = {r.path for r in main.app.routes}
     for ruta in (
         "/api/chat",
         "/api/briefing",
+        "/api/aprobaciones",
+        "/api/estado",
         "/api/aprobaciones/{tool_call_id}/aprobar",
         "/api/aprobaciones/{tool_call_id}/rechazar",
         "/healthz",
@@ -232,6 +254,7 @@ if __name__ == "__main__":
     identidad()
     query_del_briefing()
     rutas()
+    consola()
     asyncio.run(catalogo_propio())
     asyncio.run(candados_memoria())
     asyncio.run(arranque())
