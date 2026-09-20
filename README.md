@@ -159,6 +159,12 @@ los seis contenedores del asistente escritos uno a uno en el propio regex: ni
 comprueba en cada despliegue, y la comprobacion que importa es que
 `apiarena-postgres` da 403.
 
+`haproxy.cfg` va por bind mount y **HAProxy solo lee su configuracion al
+arrancar**. Cambiar el fichero no hace que compose recree el contenedor, porque
+el contenido del fichero no es parte de su configuracion: el proceso se queda
+con la config vieja en memoria y la nueva en disco. Por eso `deploy.sh` recrea
+el socket-proxy en cada despliegue, antes de levantar el resto.
+
 Corre sin root; entra al socket por el grupo que es su dueno, `DOCKER_GID` en
 `.env`. `deploy.sh` lo detecta y lo anade si falta.
 

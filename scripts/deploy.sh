@@ -201,6 +201,15 @@ echo "migraciones al dia"
 # ---------------------------------------------------------------- stack
 
 log "levantando el stack"
+
+# El socket-proxy, siempre recreado. Su config va por bind mount y HAProxy la
+# lee solo al arrancar: si cambia haproxy.cfg, compose no recrea el contenedor
+# (el fichero no es parte de su configuracion) y el proceso se queda con la
+# config vieja en memoria, con el fichero nuevo en disco. Paso: la F2 abrio el
+# POST /restart y el proxy siguio denegandolo. Es un proxy sin estado, tarda un
+# segundo y tiene healthcheck.
+docker compose up -d --force-recreate --wait docker-socket-proxy
+
 docker compose up -d --build --remove-orphans --wait --wait-timeout 300
 
 # ---------------------------------------------------------------- verificacion
@@ -236,8 +245,13 @@ casos = [
     ("POST", "/containers/apiarena-postgres/restart", 403),
     ("POST", "/containers/puente-postgres/restart", 403),
     ("POST", "/containers/puente-socket-proxy/restart", 403),
+    # Lo que se abre es la ruta /restart, no el contenedor: con el mismo nombre
+    # permitido, cualquier otro verbo de docker sigue dando 403.
+    ("POST", "/containers/puente-ntfy/stop", 403),
+    ("POST", "/containers/puente-agent/pause", 403),
     ("POST", "/v1.44/containers/apiarena-postgres/restart", 403),
     ("POST", "/containers/puente-ntfy/restart", 204),
+    ("POST", "/v1.44/containers/puente-ntfy/restart", 204),
     ("GET", "/containers/no-existe/json", 403),
     ("GET", "/v1.44/containers/no-existe/json", 403),
     ("GET", "/containers/no-existe/archive?path=/", 403),
