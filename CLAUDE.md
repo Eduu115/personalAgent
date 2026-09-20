@@ -311,6 +311,23 @@ que un job diario vacia el contenido de las filas de mas de 30 dias
 
 ---
 
+## La identidad del dueno
+
+El system prompt lleva detras un bloque corto con quien es Edu, construido desde
+configuracion y no escrito en el codigo (`config.Settings.prompt`):
+
+- `DUENO` (por defecto "Edu").
+- Su correo: **la misma** variable `GMAIL_USUARIO` con la que google-mcp entra
+  al buzon. No hay una segunda variable con el correo que pueda quedarse vieja.
+  Si no esta configurada, el prompt dice que pregunte en vez de inventarse una.
+- `ZONA_HORARIA` (por defecto Europe/Madrid), de donde salen "hoy", las horas de
+  los briefings y las de las caducidades. La leen el agente y google-mcp, asi
+  que el calendario y el chat no pueden hablar de horas distintas.
+
+El bloque dice explicitamente que eso es configuracion del sistema y por tanto
+instrucciones, no contenido devuelto por una herramienta (regla 2). Sin esto, a
+un "hazme un borrador para mi mismo" el agente tenia que preguntar la direccion.
+
 ## Convenciones
 
 - Codigo y comentarios en espanol, sin acentos en los comentarios (evita lios de

@@ -118,6 +118,27 @@ async def arranque() -> None:
         (main.AsyncIOScheduler, db.open_pool, db.close_pool, db.hay_briefing_desde, briefing.lanzar) = original
 
 
+def identidad() -> None:
+    """El prompt lleva quien es el dueno, y sale de configuracion.
+
+    Con valores inventados: si algo de esto estuviera escrito en el codigo, no
+    cambiaria al cambiar la configuracion y la prueba lo veria.
+    """
+    original = (settings.dueno, settings.gmail_usuario, settings.zona_horaria)
+    try:
+        settings.dueno, settings.gmail_usuario, settings.zona_horaria = "Prueba", "p@ejemplo.org", "America/Lima"
+        prompt = settings.prompt
+        for dato in ("Prueba", "p@ejemplo.org", "America/Lima"):
+            assert dato in prompt, f"el prompt no lleva {dato}"
+        assert "instrucciones" in prompt and "herramienta" in prompt, "falta decir que es identidad, no datos"
+        # Sin correo configurado no se lo inventa: dice que lo pregunte.
+        settings.gmail_usuario = ""
+        assert "pregúntasela" in settings.prompt and "p@ejemplo.org" not in settings.prompt
+    finally:
+        (settings.dueno, settings.gmail_usuario, settings.zona_horaria) = original
+    print(f"OK identidad en el prompt: {settings.dueno}, {settings.gmail_usuario or '(sin correo)'}, {settings.zona_horaria}")
+
+
 def rutas() -> None:
     """Las rutas que abren los botones del push siguen existiendo."""
     caminos = {r.path for r in main.app.routes}
@@ -135,6 +156,7 @@ def rutas() -> None:
 
 if __name__ == "__main__":
     referencias()
+    identidad()
     rutas()
     asyncio.run(arranque())
     print("todo OK")

@@ -6,7 +6,8 @@ nombre. (El servidor baja el logger de httpx a WARNING, que en INFO escribe
 cada URL que pide.)
 
 Las RRULE, EXDATE y RECURRENCE-ID las resuelve recurring-ical-events. Las horas
-se pasan a Europe/Madrid; una hora sin zona ("flotante") se toma como de Madrid.
+se pasan a la zona del dueno (ZONA_HORARIA); una hora sin zona ("flotante") se
+toma como de ahi.
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ import httpx
 import recurring_ical_events
 from icalendar import Calendar
 
-MADRID = ZoneInfo("Europe/Madrid")
+MADRID = ZoneInfo(os.environ.get("ZONA_HORARIA", "Europe/Madrid"))
 # Google refleja un evento nuevo en menos de 8 s (medido): la cache es el
 # unico retraso que queda, asi que corta.
 _TTL = 60.0
@@ -164,7 +165,7 @@ async def agenda(dias: int, configurados: list[tuple[str | None, str]] | None = 
         e.pop("_orden")
         e.pop("_fin", None)
     return {
-        "zona": "Europe/Madrid",
+        "zona": str(MADRID),
         "ahora": datetime.now(MADRID).strftime("%Y-%m-%d %H:%M"),
         "desde": _dia(hoy),
         "hasta": _dia(hoy + timedelta(days=dias - 1)),
