@@ -39,6 +39,9 @@ async def pendientes() -> dict[str, Any]:
             {
                 "id": f["id"],
                 "herramienta": f["tool_name"],
+                # Para que la consola pueda sondear la conversacion y ensenar
+                # como acabo: si no, el unico canal seria el push al movil.
+                "conversation_id": str(f["conversation_id"]) if f["conversation_id"] else None,
                 "riesgo": f["risk"],
                 "argumentos": f["arguments"],
                 "que_pasa": aprobaciones.que_pasa(f),
