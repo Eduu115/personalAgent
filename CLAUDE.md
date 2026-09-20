@@ -249,7 +249,15 @@ ejecutan.
 **Migraciones** (`db/migrations/NNN_*.sql`): las aplica `deploy.sh` antes de
 levantar el agente, en una transaccion y apuntandolas en `schema_migrations`.
 Nunca desde el arranque del agente. `db/init/` sigue siendo solo el esqueleto
-del primer arranque.
+del primer arranque. La 002 pone en la base el invariante de las pendientes
+(sin nonce y sin caducidad no puede existir una fila `pending`).
+
+**Antes de migrar, `deploy.sh` comprueba que el codigo nuevo arranca**
+(`app.pruebas`: lifespan con los jobs registrados, referencias colgantes y
+rutas). La F2 borro `briefing.por_cron` en un refactor, `main.py` seguia
+llamandola y el agente entro en bucle de reinicio en el server; en el portatil
+no salto porque el override de desarrollo apaga el briefing y esa rama no se
+ejecuta nunca. Por eso el orden es: construir, comprobar, migrar, levantar.
 
 **Retencion del audit log**: `tool_calls` no admite DELETE (hay un trigger), asi
 que un job diario vacia el contenido de las filas de mas de 30 dias

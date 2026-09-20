@@ -273,6 +273,19 @@ esquema posteriores van en `db/migrations/NNN_*.sql`, y los aplica `deploy.sh`
 `schema_migrations`, y si uno falla el despliegue se para con el stack viejo
 sirviendo. Nunca se aplican desde el arranque del agente.
 
+Y antes de las migraciones, `deploy.sh` construye las imagenes y comprueba que
+el codigo nuevo arranca:
+
+```bash
+docker compose run --rm --no-deps agent python -m app.pruebas
+```
+
+Eso levanta la app entera con su `lifespan` y los jobs del planificador, revisa
+que ninguna llamada `modulo.funcion` del paquete apunte a algo que ya no existe
+y que sigan estando las rutas de los botones de aprobacion. Si falla, el
+despliegue aborta **sin tocar la base de datos**: al reves, el esquema se queda
+por delante del codigo.
+
 ```bash
 docker compose exec postgres psql -U puente -d puente -c "select * from schema_migrations;"
 ```

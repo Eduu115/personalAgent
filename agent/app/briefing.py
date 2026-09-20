@@ -68,6 +68,35 @@ def aviso_no_consultado(no_consultado: dict[str, str]) -> str | None:
     return "⚠️ No he podido consultar " + "; ni ".join(partes) + "."
 
 
+def ultimo_disparo(trigger: CronTrigger, ahora: datetime) -> datetime | None:
+    """La ultima hora a la que tocaba el cron, si cae dentro de VENTANA."""
+    t = trigger.get_next_fire_time(None, ahora - VENTANA)
+    ultimo = None
+    while t is not None and t <= ahora:
+        ultimo = t
+        t = trigger.get_next_fire_time(t, t + timedelta(seconds=1))
+    return ultimo
+
+
+async def por_cron(trigger: CronTrigger) -> None:
+    """Lo que ejecuta el cron: sabe a que hora tocaba, por si llega tarde."""
+    await lanzar(programado=ultimo_disparo(trigger, datetime.now(MADRID)))
+
+
+async def pendiente(trigger: CronTrigger) -> datetime | None:
+    """La hora de un briefing que no ha salido y todavia esta a tiempo, o None.
+
+    El planificador vive en memoria: si el agente estaba parado a las 7:30, al
+    arrancar calcula la siguiente para manana y misfire_grace_time no llega a
+    mirar la de hoy. Esto si: si tocaba hace menos de VENTANA y no hay
+    briefing desde entonces, toca ahora.
+    """
+    ultimo = ultimo_disparo(trigger, datetime.now(MADRID))
+    if ultimo is None or await db.hay_briefing_desde(ultimo):
+        return None
+    return ultimo
+
+
 async def lanzar(programado: datetime | None = None) -> dict[str, Any]:
     ahora = datetime.now(MADRID)
     dia = programado or ahora

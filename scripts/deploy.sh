@@ -137,6 +137,22 @@ echo "$antes -> $despues"
 # A partir de aqui, si algo falla se ve el estado sin tener que ir a buscarlo.
 trap 'printf "\n--- fallo: estado del stack\n"; docker compose ps; docker compose logs --tail 30' ERR
 
+# ---------------------------------------------------------------- el codigo arranca
+
+# Antes de tocar la base de datos: si el codigo nuevo no levanta, el despliegue
+# se para aqui y el viejo sigue sirviendo con su esquema. Al reves (migrar y
+# luego descubrir que el agente no arranca) deja la base adelantada respecto al
+# codigo. La F2 se llevo por delante una funcion que main.py seguia llamando y
+# el agente entro en bucle de reinicio: esto es para que eso pare aqui.
+log "comprobando que el codigo nuevo arranca"
+docker compose build agent homelab-mcp google-mcp
+docker compose run --rm --no-deps -T agent python -m app.pruebas \
+    || fallo "el agente no arranca con este codigo: no se ha tocado la base de datos"
+docker compose run --rm --no-deps -T google-mcp python -m app.pruebas \
+    || fallo "google-mcp no pasa sus comprobaciones: no se ha tocado la base de datos"
+docker compose run --rm --no-deps -T homelab-mcp python -c "import app.server" \
+    || fallo "homelab-mcp no arranca con este codigo: no se ha tocado la base de datos"
+
 # ---------------------------------------------------------------- base de datos
 
 log "postgres"
