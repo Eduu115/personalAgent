@@ -144,6 +144,7 @@ Los ojos del asistente sobre el homelab. Cuatro herramientas, todas de lectura:
 | `lab_stats` | Memoria de un contenedor y cuanto le queda para su `mem_limit` |
 | `lab_logs` | Ultimas lineas de un contenedor, con los secretos redactados |
 | `lab_reiniciar` | **Escritura.** Reinicia un contenedor del asistente, y solo esos. Pasa por la cola de aprobaciones |
+| `lab_update_stack` | **Escritura.** `compose pull` + `up -d` de un stack de la lista permitida, por el helper del host. Pasa por la cola |
 
 El socket de Docker solo lo ve `docker-socket-proxy`, un HAProxy con lista blanca
 en `config/haproxy.cfg`: solo GET y solo `/_ping`, `/info`, `/version`,
@@ -278,6 +279,61 @@ docker compose exec postgres psql -U puente -d puente \
 
 Con `READ_ONLY=true` las escrituras ni se le ofrecen al modelo. El briefing y
 cualquier otra tarea programada tampoco pueden encolarlas: solo lectura.
+
+## Actualizar stacks: el helper del host
+
+`lab_update_stack` hace `compose pull` + `up -d` sobre un stack del homelab. Eso
+no cabe en el socket-proxy (habria que abrir crear y borrar contenedores, y se
+acabo la frontera), asi que lo hace un proceso pequeno del host, fuera de
+Docker, con una sola operacion. El porque, en `CLAUDE.md`.
+
+### Instalarlo (a mano, una vez)
+
+```bash
+sudo ./scripts/instalar_helper.sh
+```
+
+Dice todo lo que va a hacer y pregunta antes de tocar nada: crea el grupo
+`puente-helper`, copia el helper a `/usr/local/lib/puente/`, crea
+`/etc/puente/stacks.conf` (root, 600) e instala y arranca la unidad de systemd.
+Al acabar te dice el `HELPER_GID` que tienes que poner en el `.env`.
+
+Despues, en `/etc/puente/stacks.conf`, una linea por stack:
+
+```
+nextcloud=/home/edu/apps/nextcloud
+```
+
+y en el `.env` del proyecto, los que quieras que el agente pueda tocar:
+
+```
+STACKS_ACTUALIZABLES=nextcloud
+HELPER_GID=<el que dijo el instalador>
+```
+
+Sin `STACKS_ACTUALIZABLES`, la herramienta no existe para el agente. `apiarena`
+y `puente` no se actualizan nunca, aunque los pongas en `stacks.conf`.
+
+### Mirarlo, pararlo y desinstalarlo
+
+```bash
+systemctl status puente-helper            # como esta
+journalctl -u puente-helper -f            # que hace
+python3 scripts/helper_cli.py /run/puente/helper.sock '{"op":"ping"}'
+
+sudo systemctl stop puente-helper         # parar (la herramienta deja de funcionar)
+sudo systemctl disable --now puente-helper
+
+sudo ./scripts/instalar_helper.sh --desinstalar
+```
+
+Desinstalar para el servicio y borra la unidad y el helper, pero **deja**
+`/etc/puente/stacks.conf` y el grupo, por si vuelves a instalarlo. Para quitar
+tambien eso: `sudo rm -rf /etc/puente && sudo groupdel puente-helper`.
+
+`deploy.sh` comprueba en cada despliegue que el socket existe con los permisos
+esperados, que responde, que rechaza un stack que no conoce y que **rechaza
+apiarena aunque este en su configuracion**.
 
 ## Memoria
 

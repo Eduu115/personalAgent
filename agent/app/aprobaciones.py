@@ -28,11 +28,25 @@ from .llm import Llamada
 log = logging.getLogger(__name__)
 
 # Lo que va a pasar de verdad si se aprueba, para el push. Para `sensitive` no
-# basta con el nombre de la herramienta (regla 3 de CLAUDE.md).
+# basta con el nombre de la herramienta (regla 3 de CLAUDE.md). Se formatean con
+# los argumentos de la llamada: el push tiene que decir QUE se toca.
 _QUE_PASA = {
-    "lab_reiniciar": "Se para y se arranca el contenedor: unos segundos sin servicio.",
+    "lab_reiniciar": "Se para y se arranca {contenedor}: unos segundos sin servicio.",
     "mail_borrador": "Se guarda un borrador en Gmail. NO se envía: no existe ninguna herramienta que envíe.",
+    "lab_update_stack": (
+        "Descarga las imágenes nuevas de {stack} y recrea sus contenedores: ese servicio "
+        "estará caído unos segundos. No hay vuelta atrás automática, pero el aviso del "
+        "final trae los digests de ahora para poder volver."
+    ),
 }
+
+
+def _que_pasa(fila: dict[str, Any]) -> str:
+    plantilla = _QUE_PASA.get(fila["tool_name"], "Es una acción con efectos.")
+    try:
+        return plantilla.format(**(fila["arguments"] or {}))
+    except (KeyError, IndexError):
+        return plantilla
 
 
 class Rechazada(Exception):
@@ -115,7 +129,7 @@ async def encolar(
         [
             _detalle(fila),
             "",
-            _QUE_PASA.get(fila["tool_name"], "Es una acción con efectos."),
+            _que_pasa(fila),
             f"Caduca a las {caduca}. Si caduca, no se hace nada.",
         ]
     )
@@ -217,6 +231,13 @@ async def completar(fila: dict[str, Any]) -> None:
         }[fila["status"]]
         sobre = herramientas.sobre(fila["tool_name"], fila["status"], motivo)
 
+    # Lo que la herramienta quiera que salga en el aviso pase lo que pase con el
+    # modelo: para lab_update_stack, la salud y los digests de antes.
+    cerrada = await db.llamada(fila["id"])
+    extra = ""
+    if isinstance((cerrada or {}).get("result"), dict) and cerrada["result"].get("resumen_push"):
+        extra = "\n\n" + cerrada["result"]["resumen_push"]
+
     respuesta = None
     try:
         async for evento, datos in bucle.conversar(
@@ -244,7 +265,7 @@ async def completar(fila: dict[str, Any]) -> None:
     await ntfy.publicar(
         settings.ntfy_topic_aprobaciones,
         f"{estado}: {fila['tool_name']}",
-        respuesta or "(sin respuesta del modelo)",
+        (respuesta or "(sin respuesta del modelo)") + extra,
         enlace=enlace,
         etiquetas=["white_check_mark"] if fila["status"] == "approved" else ["x"],
     )

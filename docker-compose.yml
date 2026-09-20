@@ -209,6 +209,10 @@ services:
       DOCKER_API: http://docker-socket-proxy:2375
       HOSTFS: /hostfs
       PROC_PATH: /host/proc
+      # Los stacks que lab_update_stack puede actualizar. Vacio: la herramienta
+      # ni se registra. Quien manda de verdad es /etc/puente/stacks.conf del
+      # host, que el agente no ve.
+      STACKS_ACTUALIZABLES: ${STACKS_ACTUALIZABLES:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     volumes:
       # Solo lectura y sin root: solo alcanza lo que ya es legible por todos.
@@ -217,6 +221,10 @@ services:
         source: /proc
         target: /host/proc
         read_only: true
+      # El socket del helper del host: la unica via para actualizar un stack
+      # (el socket-proxy no puede, ver homelab-mcp/app/helper.py). En desarrollo
+      # no existe, se monta /dev/null y da igual porque la herramienta no esta.
+      - ${HELPER_SOCKET:-/dev/null}:/run/puente/helper.sock
       - type: bind
         source: /
         target: /hostfs
@@ -230,6 +238,10 @@ services:
       - /tmp:size=16m
     security_opt:
       - no-new-privileges:true
+    # El grupo que puede hablar con el helper del host (lo crea su instalador).
+    # Por defecto, el grupo propio del usuario del contenedor: no da nada.
+    group_add:
+      - "${HELPER_GID:-10002}"
     # Publicado en localhost para que Claude Code en el server use el mismo
     # servidor MCP que el agente. Una integracion, dos clientes.
     ports:
