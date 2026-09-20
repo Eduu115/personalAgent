@@ -212,6 +212,29 @@ def query_del_briefing() -> None:
     print(f"OK consulta del briefing desde configuracion: {settings.query_briefing}")
 
 
+async def atajo_del_estado() -> None:
+    """El atajo de /api/estado solo deja pasar herramientas de lectura."""
+    from . import herramientas
+    from .routes import consola as vista
+
+    for nombre in ("lab_reiniciar", "lab_update_stack", "mail_borrador", "memoria_guardar", "no_existe"):
+        try:
+            await vista._leer({}, {nombre: "homelab"}, nombre)
+        except RuntimeError as exc:
+            assert "no es de lectura" in str(exc), (nombre, exc)
+        else:
+            raise AssertionError(f"'{nombre}' ha pasado por el atajo de la consola")
+    # Y una de lectura si pasa el candado: falla despues, al buscar la sesion.
+    assert herramientas.RIESGO["lab_status"] == "read"
+    try:
+        await vista._leer({}, {"lab_status": "homelab"}, "lab_status")
+    except KeyError:
+        pass
+    else:
+        raise AssertionError("sin sesiones tendria que haber fallado al enrutar")
+    print("OK atajo de /api/estado: solo herramientas de lectura")
+
+
 def consola() -> None:
     """La consola se sirve y NO se ha comido las rutas de la API.
 
@@ -255,6 +278,7 @@ if __name__ == "__main__":
     query_del_briefing()
     rutas()
     consola()
+    asyncio.run(atajo_del_estado())
     asyncio.run(catalogo_propio())
     asyncio.run(candados_memoria())
     asyncio.run(arranque())
