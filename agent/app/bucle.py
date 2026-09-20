@@ -57,7 +57,7 @@ async def conversar(
 
     Con `reanudacion`, retoma un turno que se quedo esperando una aprobacion.
     """
-    mensajes = [{"role": "system", "content": settings.system_prompt}] + await db.history(
+    mensajes = [{"role": "system", "content": settings.prompt}] + await db.history(
         conversation_id, settings.history_limit
     )
     if reanudacion:

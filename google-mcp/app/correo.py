@@ -35,7 +35,7 @@ from .redact import redactar
 
 log = logging.getLogger(__name__)
 
-MADRID = ZoneInfo("Europe/Madrid")
+MADRID = ZoneInfo(os.environ.get("ZONA_HORARIA", "Europe/Madrid"))
 MAX_CUERPO = 4000
 MAX_SNIPPET = 200
 # IMAP no tiene el snippet de la API de Gmail: sale de los primeros KB del
