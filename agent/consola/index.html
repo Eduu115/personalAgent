@@ -63,6 +63,12 @@ button:disabled { opacity: .55; cursor: default; }
 button.si { background: #17351f; border-color: #2b5a34; }
 button.no { background: #35191a; border-color: #5a2b2b; }
 .resuelta { color: var(--suave); padding-top: 8px; }
+.resuelta.esperando::after {
+  content: ""; display: inline-block; width: 8px; height: 8px; margin-left: 6px; border-radius: 50%;
+  background: var(--acento); animation: latido 1.2s ease-in-out infinite;
+}
+.resuelta.fallo { color: var(--ojo); }
+@keyframes latido { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
 
 /* --- estado --- */
 .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
@@ -71,6 +77,11 @@ button.no { background: #35191a; border-color: #5a2b2b; }
 .tile.ojo { border-left-color: var(--ojo); } .tile.off { opacity: .55; }
 .tile .n { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tile .e { font-size: 12px; color: var(--suave); }
+.grupo {
+  display: flex; justify-content: space-between; align-items: baseline; margin: 12px 0 6px;
+  font-size: 11px; text-transform: uppercase; letter-spacing: .7px; color: var(--suave);
+}
+.grupo .malos { color: var(--ojo); }
 .medidas { margin: 14px 0 6px; }
 .barra { height: 8px; background: #0d1117; border-radius: 5px; overflow: hidden; margin: 4px 0 10px; }
 .barra > div { height: 100%; background: var(--acento); }
@@ -139,7 +150,10 @@ const pulso = (bien) => $("#pulso").className = "punto " + (bien ? "ok" : "mal")
 
 // ---------------------------------------------------------------- aprobaciones
 let pendientes = [];
-const resueltas = new Map();   // id -> texto, para que la ficha no desaparezca de golpe
+// id -> {texto, clase, ficha}. La fila deja de estar pending en cuanto se
+// resuelve, pero su ficha tiene que seguir en pantalla hasta que se sepa como
+// acabo: si no, pulsas Aprobar y desaparece sin decir nada.
+const resueltas = new Map();
 
 function cuentaAtras(segundos) {
   const m = Math.floor(segundos / 60), s = Math.max(0, Math.round(segundos % 60));
@@ -150,24 +164,26 @@ function pintarAprobaciones() {
   const caja = $("#aprobaciones");
   caja.replaceChildren();
   $("#n-aprob").textContent = pendientes.length;
-  if (!pendientes.length && !resueltas.size) {
+  const vivas = new Set(pendientes.map((p) => p.id));
+  const fichas = [...pendientes, ...[...resueltas.values()].filter((r) => !vivas.has(r.ficha.id)).map((r) => r.ficha)];
+  if (!fichas.length) {
     caja.append(crear("p", "vacio", "Nada esperando. Todo lo que el agente quiera hacer aparecerá aquí."));
     return;
   }
-  for (const p of pendientes) {
+  for (const p of fichas) {
     const ficha = crear("div", "ficha " + p.riesgo);
     const cabecera = crear("div");
     cabecera.append(crear("span", "nombre", p.herramienta), " ", crear("span", "riesgo", p.riesgo));
     ficha.append(cabecera, crear("div", "pasa", p.que_pasa));
     ficha.append(crear("pre", null, JSON.stringify(p.argumentos, null, 1)));
 
-    const queda = crear("div", "queda");
-    queda.dataset.caduca = p.caduca_en;
-    ficha.append(queda);
-
     if (resueltas.has(p.id)) {
-      ficha.append(crear("div", "resuelta", resueltas.get(p.id)));
+      const estado = resueltas.get(p.id);
+      ficha.append(crear("div", "resuelta " + (estado.clase || ""), estado.texto));
     } else {
+      const queda = crear("div", "queda");
+      queda.dataset.caduca = p.caduca_en;   // la cuenta atras solo mientras espera un OK
+      ficha.append(queda);
       const botones = crear("div", "botones");
       for (const [accion, etiqueta, clase] of [["aprobar", "Aprobar", "si"], ["rechazar", "Rechazar", "no"]]) {
         const b = crear("button", clase, etiqueta);
@@ -189,24 +205,70 @@ function refrescarCuentas() {
   }
 }
 
+async function respuestasDe(id) {
+  if (!id) return [];
+  try {
+    const r = await fetch(`/api/conversations/${id}`);
+    return (await r.json()).messages.filter((m) => m.role === "assistant");
+  } catch (e) {
+    return [];
+  }
+}
+
+// Estados de una ficha: reposo -> enviando -> ejecutando -> resuelto (o sin
+// respuesta). El push de ntfy es para cuando NO estas delante; delante de la
+// pantalla la respuesta tiene que llegar aqui.
 async function resolver(p, accion, botones) {
-  // Tres estados visibles: reposo, enviando, resuelto.
   for (const b of botones.querySelectorAll("button")) b.disabled = true;
   const boton = botones.querySelector(accion === "aprobar" ? ".si" : ".no");
-  const original = boton.textContent;
   boton.textContent = "Enviando…";
+
+  const antes = (await respuestasDe(p.conversation_id)).length;
+  let datos = {};
   try {
     const r = await fetch(`/api/aprobaciones/${p.id}/${accion}?n=${encodeURIComponent(p.nonce)}`, { method: "POST" });
-    const datos = await r.json();
-    resueltas.set(p.id, r.ok
-      ? (accion === "aprobar" ? "Aprobado. Ejecutándose; te aviso al terminar." : "Rechazado. No se ha ejecutado nada.")
-      : `No se ha podido: ${datos.motivo || r.status}`);
+    datos = await r.json();
+    if (!r.ok) throw new Error(datos.motivo || r.status);
   } catch (e) {
-    resueltas.set(p.id, `No se ha podido: ${e}`);
-    boton.textContent = original;
+    resueltas.set(p.id, { texto: "No se ha podido: " + e.message, clase: "fallo", ficha: p });
+    pintarAprobaciones();
+    setTimeout(() => { resueltas.delete(p.id); cargarAprobaciones(); }, 5000);
+    return;
   }
+
+  resueltas.set(p.id, {
+    texto: accion === "aprobar" ? "Ejecutando y esperando al agente" : "Rechazado; avisando al agente",
+    clase: "esperando",
+    ficha: p,
+  });
   pintarAprobaciones();
-  setTimeout(() => { resueltas.delete(p.id); cargarAprobaciones(); }, 4000);
+  esperarRespuesta(p, accion, antes);
+}
+
+async function esperarRespuesta(p, accion, antes) {
+  const limite = Date.now() + 120000;   // 2 min y se deja de girar
+  while (Date.now() < limite) {
+    await new Promise((r) => setTimeout(r, 2000));
+    const respuestas = await respuestasDe(p.conversation_id);
+    if (respuestas.length > antes) {
+      const hecho = accion === "aprobar" ? "aprobado" : "rechazado";
+      const otra = p.conversation_id !== conversacion ? " (de otra conversación)" : "";
+      evento(`⏸ ${p.herramienta} ${hecho} — el agente responde${otra}:`, "aviso");
+      hilo().append(crear("div", "msg el", respuestas[respuestas.length - 1].content));
+      alFinal();
+      resueltas.delete(p.id);
+      cargarAprobaciones();
+      cargarEstado();
+      return;
+    }
+  }
+  resueltas.set(p.id, {
+    texto: "Sin respuesta en 2 minutos. Mira los logs del agente.",
+    clase: "fallo",
+    ficha: p,
+  });
+  pintarAprobaciones();
+  setTimeout(() => { resueltas.delete(p.id); pintarAprobaciones(); }, 15000);
 }
 
 async function cargarAprobaciones() {
@@ -255,16 +317,33 @@ async function cargarEstado() {
   caja.replaceChildren();
   $("#n-cont").textContent = `${datos.docker.en_marcha}/${datos.docker.contenedores}`;
 
-  const tiles = crear("div", "tiles");
-  const orden = { mal: 0, ojo: 1, ok: 2, "": 3, off: 4 };
-  const lista = [...datos.contenedores].sort((a, b) => orden[claseSalud(a)] - orden[claseSalud(b)]);
-  for (const c of lista.slice(0, 40)) {
-    const t = crear("div", "tile " + claseSalud(c));
-    t.append(crear("div", "n", c.nombre), crear("div", "e", c.salud || c.estado));
-    t.title = `${c.imagen} — ${c.detalle}`;
-    tiles.append(t);
+  // Primero lo que no esta bien, y los del asistente aparte: son los unicos
+  // sobre los que puede actuar. Veinte contenedores sanos de APIArena no pueden
+  // enterrar al que esta reiniciandose.
+  const orden = { mal: 0, ojo: 1, "": 2, ok: 3, off: 4 };
+  const gravedad = (a, b) => orden[claseSalud(a)] - orden[claseSalud(b)] || a.nombre.localeCompare(b.nombre);
+  const problemas = (grupo) => grupo.filter((c) => ["mal", "ojo"].includes(claseSalud(c))).length;
+  const mios = datos.contenedores.filter((c) => c.nombre.startsWith("puente-")).sort(gravedad);
+  const resto = datos.contenedores.filter((c) => !c.nombre.startsWith("puente-")).sort(gravedad);
+  const grupos = [["Del asistente", mios], ["Lo demás", resto]];
+  if (problemas(resto) && !problemas(mios)) grupos.reverse();   // lo roto, arriba
+
+  for (const [titulo, grupo] of grupos) {
+    if (!grupo.length) continue;
+    const malos = problemas(grupo);
+    const cabecera = crear("div", "grupo");
+    cabecera.append(crear("span", null, titulo),
+                    crear("span", malos ? "malos" : "", malos ? `${malos} con problemas` : `${grupo.length} bien`));
+    const tiles = crear("div", "tiles");
+    for (const c of grupo.slice(0, 60)) {
+      const t = crear("div", "tile " + claseSalud(c));
+      t.append(crear("div", "n", c.nombre), crear("div", "e", c.salud || c.estado));
+      t.title = `${c.imagen} — ${c.detalle}`;
+      tiles.append(t);
+    }
+    caja.append(cabecera, tiles);
+    if (grupo.length > 60) caja.append(crear("div", "vacio", `y ${grupo.length - 60} más`));
   }
-  caja.append(tiles);
 
   const medidas = crear("div", "medidas");
   const m = datos.host.memoria;

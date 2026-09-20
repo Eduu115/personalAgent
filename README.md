@@ -252,8 +252,8 @@ movil.
 
 | Vista | Que hace |
 |---|---|
-| Aprobaciones | La cola pendiente, con lo que va a pasar en cristiano, los argumentos y el tiempo que queda. Aprobar y rechazar desde ahi, que en la notificacion del movil no siempre se puede |
-| Estado | Un tile por contenedor con color segun su salud, mas RAM, discos y carga del anfitrion. Se refresca cada 15 s |
+| Aprobaciones | La cola pendiente, con lo que va a pasar en cristiano, los argumentos y el tiempo que queda. Aprobar y rechazar desde ahi, que en la notificacion del movil no siempre se puede. Al resolver, la ficha se queda en "Ejecutando" hasta que el agente contesta, y su respuesta aparece en el chat |
+| Estado | Un tile por contenedor con color segun su salud, mas RAM, discos y carga del anfitrion. Los `puente-*` van aparte (son los unicos sobre los que el agente puede actuar) y lo que no este sano sube arriba. Se refresca cada 15 s |
 | Chat | Lo mismo que `/api/chat`, pintando ademas los eventos que ya emitia y no veia nadie: las herramientas mientras se ejecutan, lo que entra en la cola y las conversaciones bloqueadas |
 
 Es JS plano servido por el propio agente: sin framework, sin compilacion, sin

@@ -426,7 +426,17 @@ Dos endpoints nuevos, los dos de lectura:
   5 s. **No pasa por el modelo**: pintar tiles con un `docker ps` no vale tokens.
   Tampoco se auditan en `tool_calls`: es un sondeo cada 15 s, no una accion.
 
-El service worker existe solo para que sea instalable y no cachea nada.
+Al aprobar desde la consola, la ficha pasa a "Ejecutando" y la pagina sondea
+`GET /api/conversations/{id}` cada 2 s (tope de 2 min) hasta que aparece una
+respuesta nueva del asistente, que se pinta en el chat. El turno del chat ya
+habia cerrado con `done` antes de la aprobacion, asi que sin esto el unico canal
+para enterarse seria el push al movil, y delante de la pantalla te quedabas sin
+saber si paso algo. Nada de websockets por ahora: sondear dos veces por segundo
+durante dos minutos es mas barato que una capa de tiempo real.
+
+El service worker existe solo para que sea instalable y no cachea nada: ademas
+de la frescura, `/api/aprobaciones` devuelve nonces de un solo uso y cachearlos
+los escribiria en el disco del navegador.
 
 ## Convenciones
 
