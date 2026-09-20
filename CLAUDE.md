@@ -240,7 +240,14 @@ no hay herramienta de enviar y no se va a anadir) y `lab_reiniciar`
 (`sensitive`). Para esta ultima, HAProxy deja pasar POST `/restart` solo con los
 nombres de los contenedores del asistente escritos uno a uno: ni postgres, ni el
 socket-proxy, ni nada de APIArena. `deploy.sh` lo comprueba en cada despliegue,
-incluido que `apiarena-postgres` da 403.
+incluido que `apiarena-postgres` da 403, con y sin prefijo de version.
+
+Ojo con `haproxy.cfg`: va por bind mount y HAProxy solo lo lee al arrancar.
+Cambiarlo no recrea el contenedor (para compose, el contenido del fichero no es
+parte de su configuracion), asi que el proceso sigue con la config vieja
+mientras en disco esta la nueva. Paso al abrir el POST /restart de la F2: las
+denegaciones seguian bien y el reinicio permitido daba 403. `deploy.sh` recrea
+el socket-proxy en cada despliegue para que no vuelva a pasar.
 
 Invariantes, con pruebas: `origin != "user"` solo puede `read` (el briefing no
 puede encolar nada) y con `READ_ONLY=true` las escrituras ni se ofrecen ni se
