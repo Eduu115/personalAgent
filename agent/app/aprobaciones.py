@@ -44,6 +44,21 @@ class Rechazada(Exception):
         self.motivo = motivo
 
 
+async def _sin_efecto(motivo: str, fila: dict[str, Any] | None = None) -> None:
+    """Avisa de una pulsacion que no ha hecho nada.
+
+    La app de ntfy no da ninguna senal al pulsar un boton, asi que sin esto el
+    usuario no sabe si ha pulsado. Siempre hay respuesta a un boton.
+    """
+    nombre = fila["tool_name"] if fila else None
+    await ntfy.publicar(
+        settings.ntfy_topic_aprobaciones,
+        f"Sin efecto: {nombre}" if nombre else "Sin efecto",
+        f"{motivo}. No se ha ejecutado nada.",
+        etiquetas=["no_entry"],
+    )
+
+
 def _detalle(fila: dict[str, Any]) -> str:
     """Los argumentos tal cual, sin recortar: es lo que se va a ejecutar."""
     lineas = []
@@ -56,7 +71,17 @@ def _detalle(fila: dict[str, Any]) -> str:
 async def encolar(
     llamada: Llamada, *, conversation_id: Any, riesgo: str, model: str
 ) -> dict[str, Any]:
-    """Deja la llamada esperando un OK y manda el push con los botones."""
+    """Deja la llamada esperando un OK y manda el push con los botones.
+
+    Si ya hay una pendiente igual (misma herramienta, mismos argumentos, viva),
+    se reutiliza y no sale un segundo push: dos notificaciones identicas acaban
+    en la accion ejecutada dos veces.
+    """
+    if (ya := await db.pendiente_igual(llamada.nombre, llamada.argumentos or {})) is not None:
+        log.info("pendiente #%s reutilizada: %s con los mismos argumentos", ya["id"], llamada.nombre)
+        ya["reutilizada"] = True
+        return ya
+
     nonce = secrets.token_urlsafe(24)
     fila = await db.crear_pendiente(
         llamada.nombre,
@@ -109,14 +134,30 @@ async def resolver(tool_call_id: int, nonce: str, accion: str) -> dict[str, Any]
     """Valida el toque del boton y saca la fila de pending. Sin ejecutar nada."""
     fila = await db.llamada(tool_call_id)
     if fila is None:
+        await _sin_efecto("Esa aprobación no existe")
         raise Rechazada(404, "esa aprobación no existe")
     if fila["status"] != "pending":
+        cuando = fila["resolved_at"].astimezone(MADRID).strftime("%H:%M") if fila["resolved_at"] else "antes"
+        como = {
+            "approved": "ya se aprobó", "executed": "ya se aprobó y se ejecutó",
+            "failed": "ya se aprobó, y al ejecutarla fallo", "rejected": "ya la rechazaste",
+            "expired": "ya había caducado",
+        }.get(fila["status"], f"ya estaba '{fila['status']}'")
+        await _sin_efecto(f"Esa acción {como} ({cuando})", fila)
         raise Rechazada(409, f"esa acción ya estaba '{fila['status']}': no se hace nada")
     # En tiempo constante y con el nonce de la fila, que es de un solo uso.
     if not fila["nonce"] or not secrets.compare_digest(fila["nonce"], nonce):
-        log.warning("nonce que no cuadra para la aprobacion #%s", tool_call_id)
+        # Esto no es un despiste: es alguien tocando una URL de aprobacion con
+        # un nonce que no le toca.
+        log.warning(
+            "NONCE INVALIDO en la aprobacion #%s (%s): la pulsacion no se atiende",
+            tool_call_id, fila["tool_name"],
+        )
+        await _sin_efecto("Ese enlace no vale", fila)
         raise Rechazada(403, "ese enlace no vale")
     if fila["expires_at"] and fila["expires_at"] <= datetime.now(timezone.utc):
+        caduco = fila["expires_at"].astimezone(MADRID).strftime("%H:%M")
+        await _sin_efecto(f"Esa acción caducó a las {caduco}: pídela otra vez si la sigues queriendo", fila)
         raise Rechazada(409, "esa acción ha caducado: pídela otra vez si la sigues queriendo")
 
     resuelta = await db.resolver_pendiente(

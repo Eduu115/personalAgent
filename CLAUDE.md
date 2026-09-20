@@ -235,6 +235,20 @@ Una herramienta `write` o `sensitive` no se ejecuta cuando el modelo la pide:
 5. Un job cada minuto caduca las que nadie resuelve y las reanuda como un
    rechazo: si no, la conversacion se quedaria bloqueada para siempre.
 
+Dos detalles que se aprendieron usandolo:
+
+- **No hay dos pendientes iguales.** Antes de encolar se mira si ya hay una viva
+  con la misma herramienta y los mismos argumentos, venga de la conversacion que
+  venga; si la hay, se reutiliza y no sale un segundo push. Dos notificaciones
+  identicas en el movil no se distinguen, y aprobar una dejaria la otra
+  esperando para hacer lo mismo otra vez. El bloqueo sigue siendo por
+  conversacion: dos conversaciones pueden tener cada una su pendiente, lo que no
+  puede haber son dos pendientes iguales.
+- **Toda pulsacion contesta.** La app de ntfy no da ninguna senal al pulsar un
+  boton, asi que una pulsacion sobre algo ya resuelto, caducado o con un nonce
+  que no vale tambien publica un push corto diciendo por que no ha hecho nada.
+  El nonce invalido ademas deja un WARNING con el id: eso no es un despiste.
+
 Herramientas de escritura: `mail_borrador` (`write`, IMAP APPEND a borradores;
 no hay herramienta de enviar y no se va a anadir) y `lab_reiniciar`
 (`sensitive`). Para esta ultima, HAProxy deja pasar POST `/restart` solo con los
