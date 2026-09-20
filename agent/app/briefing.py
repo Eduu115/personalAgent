@@ -123,6 +123,16 @@ async def lanzar(programado: datetime | None = None) -> dict[str, Any]:
             for area in _AREAS_DE_SERVIDOR.get(servidor, [f"lo de {servidor}"]):
                 no_consultado[area] = f"{servidor}-mcp no responde"
         prompt = PROMPT
+        if anteriores := await db.ultimos_briefings(3):
+            # Para que no le cuente tres dias seguidos la misma alerta de Google.
+            contados = "\n\n".join(
+                f"— {x['creado_en'].astimezone(MADRID):%d/%m}:\n{x['resumen']}" for x in anteriores
+            )
+            prompt += (
+                "\n\nEsto es lo que ya le contaste en los últimos briefings. No repitas nada de aquí "
+                "salvo que haya cambiado: si algo sigue igual, o lo omites o lo despachas en media "
+                "línea. Lo nuevo es lo que importa.\n\n" + contados
+            )
         if no_consultado:
             prompt += (
                 f"\n\nHoy no puedes consultar {' ni '.join(no_consultado)}: sus herramientas no "
@@ -189,6 +199,10 @@ async def lanzar(programado: datetime | None = None) -> dict[str, Any]:
             etiquetas=["warning"] if no_consultado else None,
         )
         log.info("%s listo (publicado en ntfy: %s)", titulo, publicado)
+
+    if respuesta and not error:
+        # Se guarda para que el de manana sepa lo que conto el de hoy.
+        await db.guardar_briefing(respuesta, publicado)
 
     return {
         "conversation_id": str(conversation_id) if conversation_id else None,

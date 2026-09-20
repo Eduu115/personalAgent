@@ -27,7 +27,7 @@ from uuid import UUID
 
 import anyio
 
-from . import db, herramientas, llm, mcp_client
+from . import db, herramientas, llm, mcp_client, memoria
 from .config import MADRID, settings
 
 log = logging.getLogger(__name__)
@@ -57,9 +57,14 @@ async def conversar(
 
     Con `reanudacion`, retoma un turno que se quedo esperando una aprobacion.
     """
-    mensajes = [{"role": "system", "content": settings.prompt}] + await db.history(
-        conversation_id, settings.history_limit
-    )
+    mensajes = [
+        {"role": "system", "content": settings.prompt + await memoria.bloque_prompt()}
+    ] + await db.history(conversation_id, settings.history_limit)
+    # Lo que ha entrado de fuera en este turno. Con esto a True no se escribe en
+    # memoria: un correo no puede dejar un recuerdo. Al reanudar una aprobacion
+    # se empieza ya en True, porque lo primero que llega es el resultado de una
+    # herramienta.
+    contenido_externo = reanudacion is not None
     if reanudacion:
         # El tool_use que pidio permiso y su resultado. No estan en `messages` a
         # proposito (el historial persistido es solo user/assistant, que es lo
@@ -135,8 +140,14 @@ async def conversar(
                                "argumentos": argumentos}
                 t0 = time.monotonic()
                 res = await herramientas.ejecutar(
-                    sesiones, ruta, llamada, conversation_id=conversation_id, model=model, origin=origin
+                    sesiones, ruta, llamada, conversation_id=conversation_id, model=model,
+                    origin=origin, contenido_externo=contenido_externo,
                 )
+                if llamada.nombre not in herramientas.PROPIAS:
+                    # Cualquier cosa que no sirva el propio agente trae datos de
+                    # fuera. Al reves (una lista de las "externas") se olvidaria
+                    # actualizarla al anadir una herramienta.
+                    contenido_externo = True
                 yield "tool", {"estado": "fin", "id": llamada.id, "nombre": llamada.nombre,
                                "argumentos": argumentos, "resultado": res.status,
                                "duracion_ms": round((time.monotonic() - t0) * 1000)}
@@ -147,6 +158,10 @@ async def conversar(
                     pendiente = res.pendiente
                     break
                 mensajes.append({"role": "tool", "tool_call_id": llamada.id, "content": res.sobre})
+
+            if contenido_externo:
+                # Ya no se le ofrecen: que no lo intente siquiera.
+                tools = [t for t in tools if t["function"]["name"] not in herramientas.MEMORIA_ESCRIBE]
 
             if pendiente:
                 if pendiente.get("reutilizada"):

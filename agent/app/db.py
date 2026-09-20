@@ -195,6 +195,73 @@ async def history(conversation_id: UUID, limit: int) -> list[dict[str, str]]:
             return [{"role": r["role"], "content": r["content"]} for r in await cur.fetchall()]
 
 
+# ------------------------------------------------------------------ memoria
+
+
+async def guardar_briefing(resumen: str, publicado: bool) -> int:
+    async with pool().connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "INSERT INTO briefings (resumen, publicado) VALUES (%s, %s) RETURNING id",
+                (resumen, publicado),
+            )
+            return (await cur.fetchone())["id"]
+
+
+async def ultimos_briefings(cuantos: int) -> list[dict[str, Any]]:
+    """Los ultimos, para que el de hoy no repita lo que conto el de ayer."""
+    async with pool().connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT creado_en, resumen FROM briefings ORDER BY creado_en DESC LIMIT %s",
+                (cuantos,),
+            )
+            return list(reversed(await cur.fetchall()))
+
+
+async def hechos_vigentes() -> list[dict[str, Any]]:
+    """Los hechos que siguen valiendo: vigentes y sin caducar."""
+    async with pool().connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT id, texto, ambito, creado_en, caduca_en
+                  FROM hechos
+                 WHERE vigente AND (caduca_en IS NULL OR caduca_en > now())
+                 ORDER BY ambito, id
+                """
+            )
+            return await cur.fetchall()
+
+
+async def guardar_hecho(
+    texto: str, ambito: str, *, conversation_id: UUID | None, caduca_en: Any = None
+) -> dict[str, Any]:
+    """Guarda un hecho. origen siempre 'usuario': la base no admite otra cosa."""
+    async with pool().connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO hechos (texto, ambito, origen, conversation_id, caduca_en)
+                VALUES (%s, %s, 'usuario', %s, %s)
+                RETURNING id, texto, ambito, creado_en, caduca_en
+                """,
+                (texto, ambito, conversation_id, caduca_en),
+            )
+            return await cur.fetchone()
+
+
+async def olvidar_hecho(hecho_id: int) -> dict[str, Any] | None:
+    """Borrado logico: la fila se queda, deja de estar vigente."""
+    async with pool().connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "UPDATE hechos SET vigente = false WHERE id = %s AND vigente RETURNING id, texto, ambito",
+                (hecho_id,),
+            )
+            return await cur.fetchone()
+
+
 # ------------------------------------------------------------------ cola de aprobaciones
 
 

@@ -279,6 +279,36 @@ docker compose exec postgres psql -U puente -d puente \
 Con `READ_ONLY=true` las escrituras ni se le ofrecen al modelo. El briefing y
 cualquier otra tarea programada tampoco pueden encolarlas: solo lectura.
 
+## Memoria
+
+Dos tablas, ni embeddings ni pgvector (el porque, en `CLAUDE.md`):
+
+- **`briefings`**: cada briefing que sale. El siguiente recibe los tres ultimos
+  y la instruccion de no repetir lo que ya conto salvo que haya cambiado.
+- **`hechos`**: lo que le has contado de ti, por ambito (perfil, preferencia,
+  proyecto, contexto) y con caducidad opcional. Van al prompt marcados como
+  datos, no como ordenes.
+
+Tres herramientas, servidas por el propio agente: `memoria_listar` ("¿qué sabes
+de mí?"), `memoria_guardar` y `memoria_olvidar`. Olvidar no borra la fila, la
+deja fuera de lo vigente.
+
+**Cuando NO se escribe en memoria**, aunque el modelo lo pida:
+
+- En un briefing o cualquier tarea programada. Solo en turnos tuyos.
+- En un turno donde ya haya entrado contenido de fuera: un correo, el
+  calendario, unos logs. En cuanto se usa una herramienta de esas, las de
+  escribir memoria dejan de ofrecerse y se rechazan. Un correo que diga
+  "recuerda que..." no puede dejarte un recuerdo. Si querias guardarlo, dilo en
+  un mensaje nuevo.
+
+Cada escritura y cada olvido te avisan por ntfy, sin botones. Para verlo todo:
+
+```bash
+docker compose exec postgres psql -U puente -d puente \
+  -c "select id, ambito, texto, vigente, caduca_en from hechos order by id;"
+```
+
 ## Migraciones de la base de datos
 
 `db/init/` solo se aplica la primera vez que arranca Postgres. Los cambios de
