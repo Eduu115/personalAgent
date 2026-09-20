@@ -303,8 +303,8 @@ que un job diario vacia el contenido de las filas de mas de 30 dias
 - **F2 — Manos.** ~~LangGraph~~ cola de aprobaciones sobre `bucle.py` **(hecho)**,
   push con botones **(hecho)**, primeras escrituras: `mail_borrador` y
   `lab_reiniciar` **(hecho)**; kill switch real **(hecho)**; memoria
-  **(hecha, sin pgvector: ver la revision)**. Faltan: eventos de calendario y
-  `lab.update_stack`.
+  **(hecha, sin pgvector: ver la revision)**; `lab_update_stack` por el helper
+  del host **(hecho)**. Falta: eventos de calendario.
 - **F3 — La consola.** Dashboard en la tablet, Fully Kiosk, modo ambient, WoL,
   Home Assistant.
 - **F4 —** GitHub/PRs, proactividad, voz, 8B local para resumenes de madrugada.
@@ -369,6 +369,39 @@ memoria no pasa por la cola de aprobaciones, pero tiene dos candados:
 
 Cada escritura y cada olvido publican un push en `aprobaciones`, sin botones:
 para enterarse y poder pedir que se borre.
+
+## El helper del host: lo primero fuera del sandbox
+
+`lab_update_stack` (actualizar un stack: `compose pull` + `up -d`) **no** puede
+ir por el socket-proxy. Son muchas llamadas a la API de Docker (crear
+contenedores, borrar los viejos, tocar redes), y abrir POST
+`/containers/create` y DELETE `/containers/{id}` en HAProxy tiraria la frontera
+entera: con eso, un agente comprometido podria borrar y recrear
+`apiarena-postgres` aunque su nombre no salga en ningun regex. El allowlist del
+proxy no se toca.
+
+Asi que esa operacion vive fuera de Docker, en `helper/puente_helper.py`: un
+proceso del host, unidad systemd, escuchando en un socket unix. Es el primer
+componente del proyecto fuera del sandbox, y estos son sus limites:
+
+- **Una sola operacion util**: `actualizar(stack)`. Nunca una ruta, ni un
+  comando, ni un fichero compose. `stack` es una CLAVE de
+  `/etc/puente/stacks.conf` (root, 600, fuera del repo).
+- **Exclusiones en el codigo, no en la configuracion**: `apiarena` (produccion)
+  y `puente` (se mataria a si mismo a mitad y dejaria la aprobacion colgada).
+  Aunque alguien las meta en `stacks.conf`, se niega. `deploy.sh` lo comprueba
+  con una configuracion falsa en cada despliegue.
+- **El permiso es el socket**: root:`puente-helper`, modo 660. Ni puerto ni
+  token. Quien este en ese grupo puede pedirlo, y eso es `homelab-mcp` por
+  `group_add`.
+- **Sin dependencias y pequeno** (~130 lineas): tiene el socket de Docker, que
+  es equivalente a root, asi que se lee de una sentada. Si crece, algo va mal.
+- **Topes**: 90 s esperando healthchecks, 8 min el pull, 10 min en total.
+- **Se instala a mano** (`scripts/instalar_helper.sh`), nunca desde el
+  despliegue. El deploy no instala unidades de systemd.
+
+Sin vuelta atras automatica: la respuesta trae los digests de ANTES y acaban en
+la notificacion, para que revertir sea un comando y no una investigacion.
 
 ## Convenciones
 

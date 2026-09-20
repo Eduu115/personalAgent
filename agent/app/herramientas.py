@@ -46,6 +46,7 @@ RIESGO: dict[str, str] = {
     # Escrituras: no se ejecutan, se encolan y esperan un OK (aprobaciones.py).
     "mail_borrador": "write",
     "lab_reiniciar": "sensitive",
+    "lab_update_stack": "sensitive",
     # Memoria: las sirve el propio agente contra su base, no un MCP.
     "memoria_listar": "read",
     "memoria_guardar": "write",

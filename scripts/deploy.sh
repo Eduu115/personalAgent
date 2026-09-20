@@ -267,6 +267,49 @@ for metodo, ruta, esperado in casos:
 sys.exit(1 if mal else 0)
 PY
 
+# El helper del host, si esta configurado. Es el unico componente fuera de los
+# contenedores y el unico que puede recrear contenedores: se comprueba entero.
+STACKS_ACTUALIZABLES="$(sed -n 's/^STACKS_ACTUALIZABLES=//p' .env)"
+HELPER_SOCKET="$(sed -n 's/^HELPER_SOCKET=//p' .env)"
+HELPER_SOCKET="${HELPER_SOCKET:-/run/puente/helper.sock}"
+preguntar_helper() {
+    python3 scripts/helper_cli.py "$1" "$2"
+}
+if [ -z "$STACKS_ACTUALIZABLES" ]; then
+    echo "helper del host: sin configurar (lab_update_stack no existe)"
+else
+    [ -S "$HELPER_SOCKET" ] || fallo "no existe el socket del helper en $HELPER_SOCKET: ./scripts/instalar_helper.sh"
+    permisos="$(stat -Lc '%U %G %a' "$HELPER_SOCKET")"
+    case "$permisos" in
+        "root "*" 660") echo "helper: socket $HELPER_SOCKET ($permisos)" ;;
+        *) fallo "el socket del helper tiene permisos '$permisos', se esperaba 'root <grupo> 660'" ;;
+    esac
+    case "$(preguntar_helper "$HELPER_SOCKET" '{"op":"ping"}')" in
+        *'"ok": true'*) echo "helper: responde al ping" ;;
+        *) fallo "el helper no contesta: journalctl -u puente-helper -n 30" ;;
+    esac
+    case "$(preguntar_helper "$HELPER_SOCKET" '{"op":"actualizar","stack":"no-existe-este-stack"}')" in
+        *'"ok": false'*) echo "helper: un stack fuera de su mapa, rechazado" ;;
+        *) fallo "el helper NO rechaza un stack desconocido" ;;
+    esac
+    # La que importa: apiarena se rechaza AUNQUE este en la configuracion. Se
+    # prueba con una config falsa y una instancia aparte, sin tocar la de verdad.
+    conf_prueba="$(mktemp)"
+    sock_prueba="/tmp/puente-helper-prueba.sock"
+    printf 'apiarena=/tmp\npuente=/tmp\n' > "$conf_prueba"
+    rm -f "$sock_prueba"
+    PUENTE_STACKS="$conf_prueba" PUENTE_SOCKET="$sock_prueba" python3 helper/puente_helper.py >/dev/null 2>&1 &
+    prueba_pid=$!
+    sleep 1
+    veredicto="$(preguntar_helper "$sock_prueba" '{"op":"actualizar","stack":"apiarena"}' || true)"
+    kill "$prueba_pid" 2>/dev/null || true
+    rm -f "$conf_prueba" "$sock_prueba"
+    case "$veredicto" in
+        *'"ok": false'*) echo "helper: apiarena rechazada aunque este en su configuracion" ;;
+        *) fallo "EL HELPER ACTUALIZARIA APIARENA si alguien la mete en stacks.conf: $veredicto" ;;
+    esac
+fi
+
 # El reinicio de prueba de ntfy lo deja arrancando: que vuelva a estar sano.
 docker compose up -d --wait ntfy >/dev/null
 
