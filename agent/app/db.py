@@ -225,6 +225,27 @@ async def crear_pendiente(
             return await cur.fetchone()
 
 
+async def pendiente_igual(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any] | None:
+    """Una pendiente viva con la misma herramienta y los mismos argumentos.
+
+    Da igual de que conversacion sea: dos notificaciones identicas en el movil
+    no se distinguen, y aprobar una dejaria la otra esperando para ejecutar lo
+    mismo otra vez. Con un reinicio da igual; con un borrador, son dos correos.
+    """
+    async with pool().connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT * FROM tool_calls
+                 WHERE status = 'pending' AND tool_name = %s AND arguments = %s::jsonb
+                   AND expires_at > now()
+                 ORDER BY id LIMIT 1
+                """,
+                (tool_name, json.dumps(arguments)),
+            )
+            return await cur.fetchone()
+
+
 async def pendiente_de(conversation_id: UUID) -> dict[str, Any] | None:
     """La accion que espera un OK en esa conversacion, si hay alguna.
 

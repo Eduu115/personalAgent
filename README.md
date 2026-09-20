@@ -258,6 +258,14 @@ El nonce va en la URL del boton y es de un solo uso: al resolver, la fila deja
 de estar `pending` y esa URL ya no vale (409). Un nonce que no cuadra, 403. Si
 en 15 minutos no lo tocas, caduca sola y la conversacion se desbloquea.
 
+**Toda pulsacion contesta**: si tocas un boton de algo ya resuelto, caducado o
+con un enlace que no vale, llega un push corto diciendo por que no ha hecho
+nada. La app de ntfy no da ninguna senal por su cuenta.
+
+**No se encolan dos acciones identicas**: si ya hay una esperando con la misma
+herramienta y los mismos argumentos, se reutiliza esa y no sale un segundo
+push, aunque la pida otra conversacion. Resolverla vale para las dos.
+
 Al terminar llega un segundo push con lo que ha dicho el modelo: sin el,
 apruebas y te quedas sin saber como acabo.
 

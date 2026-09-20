@@ -28,7 +28,7 @@ from uuid import UUID
 import anyio
 
 from . import db, herramientas, llm, mcp_client
-from .config import settings
+from .config import MADRID, settings
 
 log = logging.getLogger(__name__)
 
@@ -149,10 +149,18 @@ async def conversar(
                 mensajes.append({"role": "tool", "tool_call_id": llamada.id, "content": res.sobre})
 
             if pendiente:
-                aviso = (
-                    f"\n\nHe pedido permiso para {pendiente['tool_name']}. "
-                    "Te aviso en cuanto lo apruebes o lo rechaces."
-                )
+                if pendiente.get("reutilizada"):
+                    desde = pendiente["requested_at"].astimezone(MADRID).strftime("%H:%M")
+                    aviso = (
+                        f"\n\nEsa misma acción ({pendiente['tool_name']}) ya está esperando tu OK "
+                        f"desde las {desde}, así que no he pedido permiso otra vez. "
+                        "Resuelve esa notificación y vale para las dos."
+                    )
+                else:
+                    aviso = (
+                        f"\n\nHe pedido permiso para {pendiente['tool_name']}. "
+                        "Te aviso en cuanto lo apruebes o lo rechaces."
+                    )
                 pieces.append(aviso)
                 yield "delta", {"text": aviso}
                 yield "aprobacion", {
@@ -160,6 +168,7 @@ async def conversar(
                     "herramienta": pendiente["tool_name"],
                     "riesgo": pendiente["risk"],
                     "caduca": pendiente["expires_at"].isoformat(),
+                    "reutilizada": bool(pendiente.get("reutilizada")),
                 }
                 break
     except asyncio.CancelledError:
