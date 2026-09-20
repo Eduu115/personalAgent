@@ -14,21 +14,14 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Any
-from zoneinfo import ZoneInfo
-
-import httpx
-
 from apscheduler.triggers.cron import CronTrigger
 
-from . import bucle, db, herramientas, mcp_client
-from .config import settings
+from . import bucle, db, herramientas, mcp_client, ntfy
+from .config import MADRID, settings
 
 log = logging.getLogger(__name__)
 
-MADRID = ZoneInfo("Europe/Madrid")
 _DIAS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
-# ntfy corta los mensajes a 4 KB: lo que no quepa sigue en la conversacion.
-_MAX_BYTES = 3800
 # Un briefing que no salio a su hora sale igual si no han pasado mas de esto:
 # un despliegue o un reinicio a las 7:30 no pueden dejar el dia sin briefing.
 VENTANA = timedelta(hours=2)
@@ -73,74 +66,6 @@ def aviso_no_consultado(no_consultado: dict[str, str]) -> str | None:
         por_motivo.setdefault(no_consultado[area], []).append(area)
     partes = [f"{' ni '.join(areas)} ({motivo})" for motivo, areas in por_motivo.items()]
     return "⚠️ No he podido consultar " + "; ni ".join(partes) + "."
-
-
-def _recortar(texto: str) -> str:
-    crudo = texto.encode()
-    if len(crudo) <= _MAX_BYTES:
-        return texto
-    return crudo[:_MAX_BYTES].decode("utf-8", "ignore").rstrip() + "\n… (sigue en la conversación)"
-
-
-async def _publicar(
-    titulo: str, mensaje: str, *, prioridad: int, enlace: str | None = None, etiquetas: list[str] | None = None
-) -> bool:
-    if not settings.ntfy_token_publicar:
-        log.error("NTFY_TOKEN_PUBLICAR sin configurar: el briefing no se publica")
-        return False
-    # En JSON y no en cabeceras: el titulo lleva tildes y las cabeceras HTTP no.
-    cuerpo: dict[str, Any] = {
-        "topic": settings.ntfy_topic,
-        "title": titulo,
-        "message": _recortar(mensaje),
-        "priority": prioridad,
-    }
-    if etiquetas:
-        cuerpo["tags"] = etiquetas
-    if enlace:
-        cuerpo["click"] = enlace
-        cuerpo["actions"] = [{"action": "view", "label": "Abrir conversación", "url": enlace}]
-    try:
-        async with httpx.AsyncClient(timeout=10) as cliente:
-            r = await cliente.post(
-                settings.ntfy_url,
-                json=cuerpo,
-                headers={"Authorization": f"Bearer {settings.ntfy_token_publicar}"},
-            )
-            r.raise_for_status()
-    except Exception as exc:
-        log.error("no se pudo publicar en ntfy: %s", exc)
-        return False
-    return True
-
-
-def ultimo_disparo(trigger: CronTrigger, ahora: datetime) -> datetime | None:
-    """La ultima hora a la que tocaba el cron, si cae dentro de VENTANA."""
-    t = trigger.get_next_fire_time(None, ahora - VENTANA)
-    ultimo = None
-    while t is not None and t <= ahora:
-        ultimo = t
-        t = trigger.get_next_fire_time(t, t + timedelta(seconds=1))
-    return ultimo
-
-
-async def por_cron(trigger: CronTrigger) -> None:
-    """Lo que ejecuta el cron: sabe a que hora tocaba, por si llega tarde."""
-    await lanzar(programado=ultimo_disparo(trigger, datetime.now(MADRID)))
-
-
-async def pendiente(trigger: CronTrigger) -> datetime | None:
-    """La hora de un briefing que no ha salido y todavia esta a tiempo, o None.
-
-    El planificador vive en memoria: si el agente estaba parado a las 7:30, al
-    arrancar calcula la siguiente para manana y misfire_grace_time no llega a
-    mirar la de hoy. Esto si: si tocaba hace menos de VENTANA y no hay
-    briefing desde entonces, toca ahora.
-    """
-    ultimo = ultimo_disparo(trigger, datetime.now(MADRID))
-    if ultimo is None or await db.hay_briefing_desde(ultimo):
-        return None
-    return ultimo
 
 
 async def lanzar(programado: datetime | None = None) -> dict[str, Any]:
@@ -216,12 +141,13 @@ async def lanzar(programado: datetime | None = None) -> dict[str, Any]:
         error = str(exc) or type(exc).__name__
 
     enlace = None
-    if settings.agente_url_publica and conversation_id:
-        enlace = f"{settings.agente_url_publica.rstrip('/')}/api/conversations/{conversation_id}"
+    if settings.puente_base_url and conversation_id:
+        enlace = f"{settings.puente_base_url.rstrip('/')}/api/conversations/{conversation_id}"
 
     if error:
         log.error("%s: ha fallado: %s", titulo, error)
-        publicado = await _publicar(
+        publicado = await ntfy.publicar(
+            settings.ntfy_topic,
             f"{titulo}: ha fallado",
             f"El briefing de hoy no ha salido: {error[:300]}",
             prioridad=4,
@@ -229,8 +155,8 @@ async def lanzar(programado: datetime | None = None) -> dict[str, Any]:
             etiquetas=["warning"],
         )
     else:
-        publicado = await _publicar(
-            titulo, respuesta or "", prioridad=3, enlace=enlace,
+        publicado = await ntfy.publicar(
+            settings.ntfy_topic, titulo, respuesta or "", prioridad=3, enlace=enlace,
             etiquetas=["warning"] if no_consultado else None,
         )
         log.info("%s listo (publicado en ntfy: %s)", titulo, publicado)

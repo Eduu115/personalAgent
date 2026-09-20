@@ -8,8 +8,9 @@ from apscheduler.triggers.cron import CronTrigger
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-from . import briefing, db, herramientas, mcp_client
+from . import aprobaciones, briefing, db, herramientas, mcp_client
 from .config import settings
+from .routes.aprobaciones import router as aprobaciones_router
 from .routes.chat import router as chat_router
 
 logging.basicConfig(
@@ -44,6 +45,18 @@ async def lifespan(app: FastAPI):
             # cubre esto sino briefing.pendiente(), justo debajo.
             misfire_grace_time=int(briefing.VENTANA.total_seconds()),
         )
+    # Sin esto, una aprobacion que nadie mira deja la conversacion bloqueada
+    # para siempre. Caduca sola y se trata como un rechazo.
+    planificador.add_job(
+        aprobaciones.caducar, "interval", minutes=1, id="caducar-aprobaciones",
+        max_instances=1, coalesce=True, misfire_grace_time=120,
+    )
+    # El audit log no se borra (hay un trigger que lo impide): se le vacia el
+    # contenido a lo viejo y se queda la metadata.
+    planificador.add_job(
+        aprobaciones.purgar, CronTrigger(hour=4, minute=15, timezone=briefing.MADRID),
+        id="purgar-audit", max_instances=1, coalesce=True, misfire_grace_time=3600,
+    )
     planificador.start()
     if settings.briefing_cron:
         log.info(
@@ -72,6 +85,7 @@ app = FastAPI(
 )
 
 app.include_router(chat_router)
+app.include_router(aprobaciones_router)
 
 
 @app.get("/healthz")

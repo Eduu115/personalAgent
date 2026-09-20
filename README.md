@@ -143,6 +143,7 @@ Los ojos del asistente sobre el homelab. Cuatro herramientas, todas de lectura:
 | `lab_host` | Memoria, swap, carga por nucleo y discos del anfitrion |
 | `lab_stats` | Memoria de un contenedor y cuanto le queda para su `mem_limit` |
 | `lab_logs` | Ultimas lineas de un contenedor, con los secretos redactados |
+| `lab_reiniciar` | **Escritura.** Reinicia un contenedor del asistente, y solo esos. Pasa por la cola de aprobaciones |
 
 El socket de Docker solo lo ve `docker-socket-proxy`, un HAProxy con lista blanca
 en `config/haproxy.cfg`: solo GET y solo `/_ping`, `/info`, `/version`,
@@ -151,6 +152,12 @@ demas da 403, incluido `/containers/{id}/json`, que devolveria las variables de
 entorno (los secretos) de todos los contenedores. `deploy.sh` lo verifica en cada
 despliegue: un POST, `json`, `archive` y `export` tienen que dar 403, y el
 despliegue falla si alguno pasa.
+
+Lo unico que se concede fuera de GET es `POST /containers/<nombre>/restart`, con
+los seis contenedores del asistente escritos uno a uno en el propio regex: ni
+`puente-postgres`, ni el socket-proxy, ni nada de APIArena. `deploy.sh` lo
+comprueba en cada despliegue, y la comprobacion que importa es que
+`apiarena-postgres` da 403.
 
 Corre sin root; entra al socket por el grupo que es su dueno, `DOCKER_GID` en
 `.env`. `deploy.sh` lo detecta y lo anade si falta.
@@ -205,6 +212,7 @@ porque, en `CLAUDE.md`).
 | `mail_buscar` | Correos que casan con una busqueda de Gmail (`is:unread newer_than:2d`, `from:banco`...): id, remitente, asunto, fecha, etiquetas, si esta leido y un snippet. Nunca el cuerpo |
 | `mail_leer` | Un correo por su id: cabeceras, adjuntos y el texto (HTML pasado a texto plano), maximo 4.000 caracteres |
 | `cal_agenda` | Eventos de hoy y los proximos dias de todos los calendarios, en hora de Madrid, con los solapes |
+| `mail_borrador` | **Escritura.** Guarda un borrador en Gmail (IMAP APPEND). No envia: no hay herramienta de enviar |
 
 Se configura en `.env` con `GMAIL_USUARIO`, `GMAIL_APP_PASSWORD` y
 `GOOGLE_ICAL_URLS` (como conseguir cada una, en `.env.example`). Sin ellas el
@@ -227,6 +235,46 @@ respuestas IMAP, iCal con recurrentes y excepciones, redaccion):
 
 ```bash
 docker compose exec google-mcp python -m app.pruebas
+```
+
+## Aprobaciones: las herramientas que escriben
+
+`mail_borrador` y `lab_reiniciar` no se ejecutan solas. Cuando el modelo pide
+una, el agente la encola y manda un push con dos botones; hasta que lo toques,
+esa conversacion no sigue.
+
+| Endpoint | Que hace |
+|---|---|
+| `POST /api/aprobaciones/{id}/aprobar?n=<nonce>` | Ejecuta y retoma la conversacion. Responde 200 al momento |
+| `POST /api/aprobaciones/{id}/rechazar?n=<nonce>` | No ejecuta nada y se lo dice al modelo |
+
+El nonce va en la URL del boton y es de un solo uso: al resolver, la fila deja
+de estar `pending` y esa URL ya no vale (409). Un nonce que no cuadra, 403. Si
+en 15 minutos no lo tocas, caduca sola y la conversacion se desbloquea.
+
+Al terminar llega un segundo push con lo que ha dicho el modelo: sin el,
+apruebas y te quedas sin saber como acabo.
+
+Para verlo entero:
+
+```bash
+docker compose exec postgres psql -U puente -d puente \
+  -c "select id, tool_name, risk, status, resolved_by, arguments from tool_calls order by id desc limit 10;"
+```
+
+Con `READ_ONLY=true` las escrituras ni se le ofrecen al modelo. El briefing y
+cualquier otra tarea programada tampoco pueden encolarlas: solo lectura.
+
+## Migraciones de la base de datos
+
+`db/init/` solo se aplica la primera vez que arranca Postgres. Los cambios de
+esquema posteriores van en `db/migrations/NNN_*.sql`, y los aplica `deploy.sh`
+**antes** de levantar el agente: cada uno en una transaccion, apuntado en
+`schema_migrations`, y si uno falla el despliegue se para con el stack viejo
+sirviendo. Nunca se aplican desde el arranque del agente.
+
+```bash
+docker compose exec postgres psql -U puente -d puente -c "select * from schema_migrations;"
 ```
 
 ## Briefing de la manana y avisos (ntfy)
@@ -437,8 +485,9 @@ docker compose exec postgres psql -U puente -d puente \
 sed -i 's/^READ_ONLY=.*/READ_ONLY=true/' .env && docker compose up -d agent
 ```
 
-Hoy no cambia nada porque aun no hay herramientas, pero el interruptor ya esta
-cableado para la F2.
+Con `READ_ONLY=true`, `mail_borrador` y `lab_reiniciar` ni se le ofrecen al
+modelo, y si las pidiera de todas formas se rechazan y queda la fila en
+`tool_calls`. Las de lectura siguen funcionando.
 
 ## Que viene ahora
 

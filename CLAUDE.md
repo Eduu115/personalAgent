@@ -32,7 +32,8 @@ Edu en la consola son *instrucciones*; todo lo que devuelve una herramienta son
 escritura sin confirmacion. Esto se implementa en el orquestador, no confiando en
 que el modelo se porte bien.
 
-**3. Tres niveles de riesgo y una cola de aprobaciones.**
+**3. Tres niveles de riesgo y una cola de aprobaciones.** Desde la F2 esto ya
+funciona: `agent/app/aprobaciones.py`.
 
 | Nivel | Que pasa |
 |---|---|
@@ -112,7 +113,7 @@ L0  Red               Tailscale, Docker, secretos con SOPS
 | Decision | Por que |
 |---|---|
 | Python + FastAPI | Backend que Edu domina, y el ecosistema MCP/LangGraph es de Python |
-| LangGraph para el bucle | `interrupt()` para el patron "para y espera confirmacion" |
+| ~~LangGraph para el bucle~~ **revisado el 20/9/2026: no se usa** | Entro por `interrupt()`, el patron "para y espera confirmacion". Pero el estado de la conversacion ya vive en Postgres (`messages`, `tool_calls`), y un checkpointer seria una segunda fuente de verdad que mantener en sintonia con la primera. La espera se hace sobre `bucle.py`: la fila `pending` en `tool_calls` ES el estado, y el turno a medias se reconstruye desde ella al reanudar |
 | LiteLLM delante de todo | Tope de gasto duro, caché, cambiar de modelo sin tocar codigo |
 | `tailscale serve` en vez de Caddy | Cert automatico, cero contenedores, 80/443 ocupados |
 | Authelia (cuando toque), no Authentik | Authentik son 1,4 GB + 3 contenedores. Authelia, 50 MB |
@@ -210,9 +211,49 @@ mientras el proceso no existia; lo hace `briefing.pendiente()` mirando la base.
 
 Siguiente: Prometheus + node_exporter + cAdvisor, y Ollama con `nomic-embed-text`.
 
-Lo que **no** hay todavia, a proposito: herramientas con efectos (todas las de
-`homelab-mcp` y `google-mcp` son de lectura), cola de aprobaciones, PWA, memoria de largo plazo, autenticacion propia (de momento la
-identidad del tailnet hace de puerta).
+Lo que **no** hay todavia, a proposito: PWA, memoria de largo plazo y
+autenticacion propia (de momento la identidad del tailnet hace de puerta, y los
+botones de aprobar van con un nonce de un solo uso).
+
+## F2: la cola de aprobaciones (20 sept 2026)
+
+Una herramienta `write` o `sensitive` no se ejecuta cuando el modelo la pide:
+
+1. `herramientas.ejecutar()` la encola en `tool_calls` (`status='pending'`, un
+   nonce de un solo uso, 15 min) y devuelve un centinela que corta la ronda.
+2. El bucle termina el turno con "He pedido permiso para X, te aviso", y sale un
+   push al topic `aprobaciones` con dos botones (`POST` con el nonce en la URL).
+   Para `sensitive`, el push lleva el detalle exacto: que contenedor, que cuerpo.
+3. Mientras la fila siga `pending`, esa conversacion no admite mensajes nuevos:
+   `POST /api/chat` contesta que hay algo pendiente **sin llamar al modelo** y
+   sin guardar el mensaje. Es lo que evita un `tool_use` huerfano con mensajes
+   de usuario por medio, que la API rechaza.
+4. `POST /api/aprobaciones/{id}/aprobar|rechazar?n=<nonce>` valida existencia,
+   que siga pendiente, el nonce (en tiempo constante) y la caducidad. Responde
+   200 al momento; ejecutar y retomar la conversacion van en una tarea de fondo,
+   con un segundo push al terminar. El nonce es de un solo uso.
+5. Un job cada minuto caduca las que nadie resuelve y las reanuda como un
+   rechazo: si no, la conversacion se quedaria bloqueada para siempre.
+
+Herramientas de escritura: `mail_borrador` (`write`, IMAP APPEND a borradores;
+no hay herramienta de enviar y no se va a anadir) y `lab_reiniciar`
+(`sensitive`). Para esta ultima, HAProxy deja pasar POST `/restart` solo con los
+nombres de los contenedores del asistente escritos uno a uno: ni postgres, ni el
+socket-proxy, ni nada de APIArena. `deploy.sh` lo comprueba en cada despliegue,
+incluido que `apiarena-postgres` da 403.
+
+Invariantes, con pruebas: `origin != "user"` solo puede `read` (el briefing no
+puede encolar nada) y con `READ_ONLY=true` las escrituras ni se ofrecen ni se
+ejecutan.
+
+**Migraciones** (`db/migrations/NNN_*.sql`): las aplica `deploy.sh` antes de
+levantar el agente, en una transaccion y apuntandolas en `schema_migrations`.
+Nunca desde el arranque del agente. `db/init/` sigue siendo solo el esqueleto
+del primer arranque.
+
+**Retencion del audit log**: `tool_calls` no admite DELETE (hay un trigger), asi
+que un job diario vacia el contenido de las filas de mas de 30 dias
+(`arguments`, `result`, `error`) y deja la metadata para siempre.
 
 ## Hoja de ruta
 
@@ -221,9 +262,10 @@ identidad del tailnet hace de puerta).
   cAdvisor, briefing programado a las 7:30 por ntfy, Ollama con `nomic-embed-text`.
   *Hecho cuando:* "que tengo hoy y que correos importan" y "como esta el server"
   funcionan las dos.
-- **F2 — Manos.** Cola de aprobaciones con LangGraph `interrupt()`, push, primeras
-  escrituras (borradores, eventos, `lab.restart`, `lab.update_stack`), kill switch,
-  memoria en pgvector.
+- **F2 — Manos.** ~~LangGraph~~ cola de aprobaciones sobre `bucle.py` **(hecho)**,
+  push con botones **(hecho)**, primeras escrituras: `mail_borrador` y
+  `lab_reiniciar` **(hecho)**; kill switch real **(hecho)**. Faltan: eventos de
+  calendario, `lab.update_stack` y la memoria en pgvector.
 - **F3 — La consola.** Dashboard en la tablet, Fully Kiosk, modo ambient, WoL,
   Home Assistant.
 - **F4 —** GitHub/PRs, proactividad, voz, 8B local para resumenes de madrugada.

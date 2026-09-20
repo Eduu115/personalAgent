@@ -8,6 +8,7 @@ Emite (evento, datos):
     delta   {"text"}                            texto segun llega, de todas las rondas
     tool    {"estado": inicio|fin, ...}         cada llamada a herramienta
     limite  {"rondas", "llamadas_sin_ejecutar"} se agotaron las rondas
+    aprobacion {"id", "herramienta", "caduca"}  una escritura espera el OK de Edu
     error   {"message"}                         y se acaba ahi
     done    {"conversation_id", "prompt_tokens", "output_tokens", "respuesta"}
 """
@@ -16,9 +17,11 @@ from __future__ import annotations
 
 import asyncio
 import itertools
+import json
 import logging
 import time
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
@@ -30,17 +33,53 @@ from .config import settings
 log = logging.getLogger(__name__)
 
 
+@dataclass
+class Reanudacion:
+    """El turno que quedo a medias esperando un OK, para retomarlo."""
+
+    tool_call_id: int
+    nombre: str
+    argumentos: dict[str, Any]
+    sobre: str  # el resultado de la herramienta, o el motivo del rechazo
+
+
 async def conversar(
-    conversation_id: UUID, *, model: str, origin: str = "user"
+    conversation_id: UUID,
+    *,
+    model: str,
+    origin: str = "user",
+    reanudacion: Reanudacion | None = None,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
     """Responde al ultimo mensaje de la conversacion y persiste la respuesta.
 
     `origin` va a cada llamada: "user" desde la consola, "schedule" las tareas
     programadas, que solo pueden usar herramientas de lectura.
+
+    Con `reanudacion`, retoma un turno que se quedo esperando una aprobacion.
     """
     mensajes = [{"role": "system", "content": settings.system_prompt}] + await db.history(
         conversation_id, settings.history_limit
     )
+    if reanudacion:
+        # El tool_use que pidio permiso y su resultado. No estan en `messages` a
+        # proposito (el historial persistido es solo user/assistant, que es lo
+        # que evita los tool huerfanos): se reconstruyen desde tool_calls.
+        idl = f"call_{reanudacion.tool_call_id}"
+        mensajes += [
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{
+                    "id": idl,
+                    "type": "function",
+                    "function": {
+                        "name": reanudacion.nombre,
+                        "arguments": json.dumps(reanudacion.argumentos, ensure_ascii=False),
+                    },
+                }],
+            },
+            {"role": "tool", "tool_call_id": idl, "content": reanudacion.sobre},
+        ]
     sesiones = mcp_client.sesiones()
     # Solo se persiste el texto de la ultima ronda: las intermedias y los
     # resultados de herramientas se quedan en esta peticion y en tool_calls.
@@ -89,18 +128,40 @@ async def conversar(
                 break
 
             mensajes.append(llm.mensaje_asistente(ronda))
+            pendiente = None
             for llamada in ronda.llamadas:
                 argumentos = llamada.argumentos if llamada.argumentos is not None else llamada.crudo
                 yield "tool", {"estado": "inicio", "id": llamada.id, "nombre": llamada.nombre,
                                "argumentos": argumentos}
                 t0 = time.monotonic()
-                status, sobre = await herramientas.ejecutar(
+                res = await herramientas.ejecutar(
                     sesiones, ruta, llamada, conversation_id=conversation_id, model=model, origin=origin
                 )
                 yield "tool", {"estado": "fin", "id": llamada.id, "nombre": llamada.nombre,
-                               "argumentos": argumentos, "resultado": status,
+                               "argumentos": argumentos, "resultado": res.status,
                                "duracion_ms": round((time.monotonic() - t0) * 1000)}
-                mensajes.append({"role": "tool", "tool_call_id": llamada.id, "content": sobre})
+                if res.status == "pending":
+                    # Se corta la ronda aqui: sin el resultado de esta llamada no
+                    # hay nada mas que decirle al modelo. Lo que pidiera despues
+                    # en la misma ronda no se ejecuta.
+                    pendiente = res.pendiente
+                    break
+                mensajes.append({"role": "tool", "tool_call_id": llamada.id, "content": res.sobre})
+
+            if pendiente:
+                aviso = (
+                    f"\n\nHe pedido permiso para {pendiente['tool_name']}. "
+                    "Te aviso en cuanto lo apruebes o lo rechaces."
+                )
+                pieces.append(aviso)
+                yield "delta", {"text": aviso}
+                yield "aprobacion", {
+                    "id": pendiente["id"],
+                    "herramienta": pendiente["tool_name"],
+                    "riesgo": pendiente["risk"],
+                    "caduca": pendiente["expires_at"].isoformat(),
+                }
+                break
     except asyncio.CancelledError:
         # El cliente cerro la pestana (o vencio el tiempo del briefing).
         # Guardamos lo generado hasta ahora para no perder la respuesta a

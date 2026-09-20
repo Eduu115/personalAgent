@@ -1,4 +1,10 @@
+from zoneinfo import ZoneInfo
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# La hora en la que vive Edu: la de los briefings y la de las caducidades que
+# se le ensenan. Los contenedores van en UTC.
+MADRID = ZoneInfo("Europe/Madrid")
 
 
 SYSTEM_PROMPT = """Eres el asistente personal de Edu, corriendo en su homelab.
@@ -54,9 +60,15 @@ class Settings(BaseSettings):
     ntfy_url: str = "http://ntfy:8080"
     ntfy_topic: str = "briefing"
     ntfy_token_publicar: str = ""
-    # Para enlazar la conversacion desde la notificacion. Mientras no haya PWA,
-    # el enlace es el JSON de /api/conversations/<id>.
-    agente_url_publica: str = ""
+    ntfy_topic_aprobaciones: str = "aprobaciones"
+    # La URL del agente en el tailnet: la abren los botones del push de
+    # aprobacion y el enlace a la conversacion del briefing. Mientras no haya
+    # PWA, ese enlace es el JSON de /api/conversations/<id>.
+    puente_base_url: str = ""
+    # Lo que espera una aprobacion antes de darse por caducada.
+    aprobacion_minutos: int = 15
+    # A los cuantos dias se vacia el contenido de las llamadas del audit log.
+    retencion_dias: int = 30
 
     # Kill switch. Con READ_ONLY=true el agente responde pero no ejecuta
     # ninguna herramienta con efectos. Lo vas a usar mas de lo que crees.

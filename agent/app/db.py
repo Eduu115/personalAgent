@@ -195,6 +195,130 @@ async def history(conversation_id: UUID, limit: int) -> list[dict[str, str]]:
             return [{"role": r["role"], "content": r["content"]} for r in await cur.fetchall()]
 
 
+# ------------------------------------------------------------------ cola de aprobaciones
+
+
+async def crear_pendiente(
+    tool_name: str,
+    *,
+    conversation_id: UUID,
+    risk: str,
+    arguments: dict[str, Any],
+    model: str,
+    nonce: str,
+    minutos: int,
+) -> dict[str, Any]:
+    """Encola una escritura y devuelve la fila. Los argumentos van sin truncar:
+    el push tiene que ensenar exactamente lo que se va a ejecutar."""
+    async with pool().connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO tool_calls
+                    (conversation_id, tool_name, risk, status, arguments, model, origin,
+                     nonce, expires_at)
+                VALUES (%s, %s, %s, 'pending', %s, %s, 'user', %s, now() + make_interval(mins => %s))
+                RETURNING *
+                """,
+                (conversation_id, tool_name, risk, json.dumps(arguments), model, nonce, minutos),
+            )
+            return await cur.fetchone()
+
+
+async def pendiente_de(conversation_id: UUID) -> dict[str, Any] | None:
+    """La accion que espera un OK en esa conversacion, si hay alguna.
+
+    Mientras la haya, la conversacion no admite mensajes nuevos: un tool_use sin
+    su tool_result con mensajes de usuario por medio es lo que la API rechaza.
+    """
+    async with pool().connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                SELECT *, EXTRACT(EPOCH FROM (expires_at - now())) AS quedan_seg
+                  FROM tool_calls
+                 WHERE conversation_id = %s AND status = 'pending'
+                 ORDER BY id LIMIT 1
+                """,
+                (conversation_id,),
+            )
+            return await cur.fetchone()
+
+
+async def llamada(tool_call_id: int) -> dict[str, Any] | None:
+    async with pool().connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT * FROM tool_calls WHERE id = %s", (tool_call_id,))
+            return await cur.fetchone()
+
+
+async def resolver_pendiente(tool_call_id: int, status: str, resolved_by: str) -> dict[str, Any] | None:
+    """Saca la fila de pending. Devuelve None si ya no lo estaba.
+
+    El WHERE status = 'pending' es lo que hace el nonce de un solo uso: dos
+    toques al mismo boton, o un toque y una caducidad, solo resuelven una vez.
+    """
+    async with pool().connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                UPDATE tool_calls
+                   SET status = %s, resolved_by = %s, resolved_at = now(), nonce = NULL
+                 WHERE id = %s AND status = 'pending'
+                RETURNING *
+                """,
+                (status, resolved_by, tool_call_id),
+            )
+            return await cur.fetchone()
+
+
+async def cerrar_llamada(
+    tool_call_id: int, *, status: str, result: Any = None, error: str | None = None
+) -> None:
+    """El desenlace de una llamada aprobada: executed o failed."""
+    async with pool().connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                UPDATE tool_calls
+                   SET status = %s, result = %s, error = %s, resolved_at = now()
+                 WHERE id = %s
+                """,
+                (status, json.dumps(result) if result is not None else None, error, tool_call_id),
+            )
+
+
+async def caducadas() -> list[dict[str, Any]]:
+    async with pool().connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT * FROM tool_calls WHERE status = 'pending' AND expires_at <= now() ORDER BY id"
+            )
+            return await cur.fetchall()
+
+
+async def purgar_payloads(dias: int) -> int:
+    """Borra el contenido de las llamadas viejas y deja la metadata.
+
+    tool_calls es append-only (hay un trigger que bloquea los DELETE), asi que
+    no se borran filas: se vacia lo que tiene dentro. Quien llamo a que, cuando
+    y como acabo se queda para siempre; los asuntos y los cuerpos de los correos
+    no tienen por que.
+    """
+    async with pool().connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                UPDATE tool_calls
+                   SET arguments = '{"_purgado": true}'::jsonb, result = NULL, error = NULL
+                 WHERE requested_at < now() - make_interval(days => %s)
+                   AND arguments <> '{"_purgado": true}'::jsonb
+                """,
+                (dias,),
+            )
+            return cur.rowcount
+
+
 # ------------------------------------------------------------------ auditoria
 
 

@@ -5,7 +5,8 @@ iCal. Nada de OAuth ni de Google Cloud: publicar la app a produccion para que el
 refresh token no caduque cada 7 dias exige politica de privacidad y dominio
 verificado, un peaje absurdo para un asistente domestico.
 
-Ninguna herramienta escribe: ni marcar como leido, ni mover, ni borrar.
+Lo unico que escribe es mail_borrador, que guarda un borrador: ni marcar como
+leido, ni mover, ni borrar, ni enviar. No hay herramienta de enviar a proposito.
 
 Se sirve por HTTP en /mcp, como homelab-mcp, para el agente y para Claude Code.
 """
@@ -84,6 +85,26 @@ async def cal_agenda(dias: int = 1) -> dict:
     if not 1 <= dias <= 31:
         raise ValueError("dias tiene que estar entre 1 y 31")
     return await calendario.agenda(dias)
+
+
+@mcp.tool()
+async def mail_borrador(para: str, asunto: str, cuerpo: str, cc: str = "") -> dict:
+    """Guarda un BORRADOR en Gmail. No lo envia: no existe ninguna herramienta que envie.
+
+    Queda en la carpeta de borradores para que Edu lo repase, lo cambie y lo
+    mande el mismo desde Gmail.
+
+    Args:
+        para: direccion de correo del destinatario.
+        asunto: asunto del correo.
+        cuerpo: texto del correo, en texto plano.
+        cc: copia, opcional.
+    """
+    if not para.strip() or not asunto.strip() or not cuerpo.strip():
+        raise ValueError("hacen falta para, asunto y cuerpo")
+    if len(asunto) > 500 or len(cuerpo) > 20000:
+        raise ValueError("asunto de hasta 500 caracteres y cuerpo de hasta 20.000")
+    return await asyncio.to_thread(correo.borrador, para.strip(), asunto.strip(), cuerpo, cc.strip() or None)
 
 
 if __name__ == "__main__":
