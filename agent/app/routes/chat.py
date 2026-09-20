@@ -21,6 +21,13 @@ class ChatRequest(BaseModel):
     model: str | None = None
 
 
+CABECERAS = {
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+}
+
+
 def sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False, default=str)}\n\n"
 
@@ -35,9 +42,29 @@ async def chat(req: ChatRequest):
             raise HTTPException(404, "esa conversacion no existe")
         conversation_id = req.conversation_id
         is_new = False
+    model = req.model or settings.smart_model
+
+    # Con una aprobacion en cola no se sigue hablando: haria falta meter el
+    # mensaje nuevo entre el tool_use y su tool_result, y eso la API lo rechaza.
+    # El mensaje ni se guarda, para no dejar un turno del usuario sin respuesta.
+    if (pendiente := await db.pendiente_de(conversation_id)) is not None:
+        minutos = max(0, round((pendiente["quedan_seg"] or 0) / 60))
+        texto = (
+            f"Antes tienes que resolver lo de {pendiente['tool_name']}: está esperando tu OK "
+            f"desde la notificación y le quedan {minutos} min. Apruébalo o recházalo y seguimos."
+        )
+
+        async def bloqueada():
+            yield sse("start", {"conversation_id": str(conversation_id), "model": model})
+            yield sse("bloqueada", {"id": pendiente["id"], "herramienta": pendiente["tool_name"],
+                                    "caduca": pendiente["expires_at"].isoformat()})
+            yield sse("delta", {"text": texto})
+            yield sse("done", {"conversation_id": str(conversation_id), "prompt_tokens": None,
+                               "output_tokens": None, "respuesta": texto})
+
+        return StreamingResponse(bloqueada(), media_type="text/event-stream", headers=CABECERAS)
 
     await db.add_message(conversation_id, "user", req.message)
-    model = req.model or settings.smart_model
 
     async def generate():
         yield sse("start", {"conversation_id": str(conversation_id), "model": model})
@@ -46,15 +73,7 @@ async def chat(req: ChatRequest):
                 await db.set_title_if_empty(conversation_id, await llm.title_for(req.message))
             yield sse(evento, datos)
 
-    return StreamingResponse(
-        generate(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",
-        },
-    )
+    return StreamingResponse(generate(), media_type="text/event-stream", headers=CABECERAS)
 
 
 @router.get("/conversations")

@@ -45,6 +45,7 @@ grep -qE '^REDIS_PASSWORD=.+' .env || fallo "REDIS_PASSWORD vacio en .env: opens
 for t in NTFY_TOKEN_PUBLICAR NTFY_TOKEN_SUSCRIBIR; do
     grep -qE "^$t=tk_[a-z0-9]{29}\$" .env || fallo "$t vacio o mal formado en .env: docker run --rm binwiederhier/ntfy:v2.28.0 token generate"
 done
+grep -qE '^PUENTE_BASE_URL=https://[^/]+[^/]$' .env || fallo "PUENTE_BASE_URL vacia, sin https o con barra final en .env: es la URL del agente en el tailnet, la que abren los botones del push"
 # Con upstream (iPhone) ntfy no arranca sin base-url.
 grep -qE '^NTFY_BASE_URL=https://[^/]+[^/]$' .env || fallo "NTFY_BASE_URL vacia o con barra final en .env: la URL de tailscale serve de ntfy, la misma que en las apps"
 # Entre comillas simples o Compose se come los $ del hash y ntfy recibe otro.
@@ -105,6 +106,11 @@ if [ -z "$DOCKER_GID" ]; then
     echo "DOCKER_GID=$DOCKER_GID anadido a .env"
 fi
 
+# Los botones de aprobar van a un topic aparte: si ntfy no lo concede, el push
+# sale con 403 y las aprobaciones no llegan a ningun sitio.
+docker compose config 2>/dev/null | grep -E '^\s+NTFY_AUTH_ACCESS:' | grep -q 'aprobaciones' \
+    || fallo "el topic 'aprobaciones' no esta en NTFY_AUTH_ACCESS (docker-compose.yml)"
+
 # Contenedores llamados puente-* que no son de este proyecto compose.
 ajenos="$(docker ps -a --filter 'name=^puente-' \
     --format '{{.Names}} {{.Label "com.docker.compose.project"}}' | awk '$2 != "puente" {print $1}')"
@@ -149,6 +155,33 @@ CREATE DATABASE litellm;
 SQL
 fi
 
+# ---------------------------------------------------------------- migraciones
+
+# Antes de levantar el agente, nunca desde su arranque: si una migracion peta,
+# el despliegue se para aqui y el codigo viejo sigue sirviendo.
+log "migraciones"
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -q' <<'SQL'
+CREATE TABLE IF NOT EXISTS schema_migrations (
+    version    text PRIMARY KEY,
+    applied_at timestamptz NOT NULL DEFAULT now()
+);
+SQL
+for fichero in db/migrations/*.sql; do
+    version="$(basename "$fichero")"
+    # La consulta por la entrada estandar: asi no hay que anidar comillas.
+    aplicada="$(printf "SELECT 1 FROM schema_migrations WHERE version = '%s';" "$version" \
+        | docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tA')"
+    if [ "$aplicada" = "1" ]; then
+        continue
+    fi
+    echo "aplicando $version"
+    # La migracion y su fila van en la misma transaccion: o entra entera o nada.
+    { cat "$fichero"; printf "INSERT INTO schema_migrations (version) VALUES ('%s');\n" "$version"; } \
+        | docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -q --single-transaction' \
+        || fallo "la migracion $version ha fallado: el stack se queda como estaba"
+done
+echo "migraciones al dia"
+
 # ---------------------------------------------------------------- stack
 
 log "levantando el stack"
@@ -180,6 +213,15 @@ def codigo(metodo, ruta):
 
 casos = [
     ("POST", "/containers/no-existe/stop", 403),
+    # Lo unico que se puede escribir es reiniciar los contenedores del puente.
+    # Que apiarena-postgres de 403 es la comprobacion que importa: al lado corre
+    # produccion. Un 204 en puente-ntfy reinicia ntfy de verdad, que es la unica
+    # forma de comprobar que el camino permitido tambien funciona.
+    ("POST", "/containers/apiarena-postgres/restart", 403),
+    ("POST", "/containers/puente-postgres/restart", 403),
+    ("POST", "/containers/puente-socket-proxy/restart", 403),
+    ("POST", "/v1.44/containers/apiarena-postgres/restart", 403),
+    ("POST", "/containers/puente-ntfy/restart", 204),
     ("GET", "/containers/no-existe/json", 403),
     ("GET", "/v1.44/containers/no-existe/json", 403),
     ("GET", "/containers/no-existe/archive?path=/", 403),
@@ -194,6 +236,9 @@ for metodo, ruta, esperado in casos:
     print(f"socket-proxy: {metodo} {ruta} -> {obtenido} ({veredicto})")
 sys.exit(1 if mal else 0)
 PY
+
+# El reinicio de prueba de ntfy lo deja arrancando: que vuelva a estar sano.
+docker compose up -d --wait ntfy >/dev/null
 
 oom=0
 for c in $(docker compose ps -q); do

@@ -82,6 +82,52 @@ async def listar_contenedores(todos: bool = True) -> list[dict[str, Any]]:
     return sorted(salida, key=lambda x: (x["proyecto"] or "~", x["nombre"]))
 
 
+# Los unicos que se pueden reiniciar. La lista que manda es la de
+# config/haproxy.cfg, que da 403 al resto: esta esta aqui para dar un error
+# claro sin gastar la llamada. Ni postgres (se lleva los datos por delante) ni
+# el socket-proxy (es quien concede esto) ni nada de APIArena, que es produccion.
+REINICIABLES = (
+    "puente-agent",
+    "puente-homelab-mcp",
+    "puente-google-mcp",
+    "puente-ntfy",
+    "puente-redis",
+    "puente-litellm",
+)
+
+
+async def _post(ruta: str, **params: Any) -> httpx.Response:
+    async with httpx.AsyncClient(base_url=BASE, timeout=TIMEOUT) as cli:
+        try:
+            r = await cli.post(ruta, params=params)
+        except httpx.HTTPError as exc:
+            raise ErrorDocker(f"no se pudo hablar con el socket-proxy: {exc}") from exc
+    if r.status_code == 403:
+        raise ErrorDocker(
+            f"el socket-proxy no permite {ruta}. La lista de lo que se puede reiniciar "
+            "esta en config/haproxy.cfg, con los nombres escritos uno a uno."
+        )
+    if r.status_code >= 400:
+        raise ErrorDocker(f"docker devolvio {r.status_code} en {ruta}: {r.text[:200]}")
+    return r
+
+
+async def reiniciar(nombre: str) -> dict[str, Any]:
+    """Para y arranca un contenedor del stack del puente."""
+    c = await _resolver(nombre)
+    if c["nombre"] not in REINICIABLES:
+        raise ErrorDocker(
+            f"'{c['nombre']}' no se puede reiniciar desde aqui. Solo: {', '.join(REINICIABLES)}"
+        )
+    await _post(f"/containers/{c['nombre']}/restart")
+    return {
+        "contenedor": c["nombre"],
+        "estado": "reiniciando",
+        "estaba": c.get("detalle"),
+        "aviso": "Tarda unos segundos en volver; su healthcheck puede tardar un poco mas.",
+    }
+
+
 async def _resolver(nombre: str) -> dict[str, Any]:
     """Valida el argumento contra los contenedores que existen de verdad.
 

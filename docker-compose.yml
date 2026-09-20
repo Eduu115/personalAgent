@@ -139,7 +139,8 @@ services:
       # Sin dos puntos a proposito: BRIEFING_CRON vacio en .env apaga el briefing.
       BRIEFING_CRON: ${BRIEFING_CRON-30 7 * * *}
       NTFY_TOKEN_PUBLICAR: ${NTFY_TOKEN_PUBLICAR}
-      AGENTE_URL_PUBLICA: ${AGENTE_URL_PUBLICA:-}
+      # La abren los botones del push de aprobacion desde el movil.
+      PUENTE_BASE_URL: ${PUENTE_BASE_URL:-}
     # El puerto que expone tailscale serve. Solo localhost.
     ports:
       - "127.0.0.1:${AGENT_PORT:-8420}:8000"
@@ -334,7 +335,9 @@ services:
       # Compose toma los $ del hash por variables y lo corta sin avisar. Si
       # alguna vez se escriben aqui directamente, cada $ va doble ($$).
       NTFY_AUTH_USERS: "puente:${NTFY_PASS_HASH_PUENTE:?define NTFY_PASS_HASH_PUENTE en .env (ver .env.example)}:user,edu:${NTFY_PASS_HASH_EDU:?define NTFY_PASS_HASH_EDU en .env (ver .env.example)}:user"
-      NTFY_AUTH_ACCESS: "puente:briefing:wo,edu:briefing:ro"
+      # briefing: el aviso de cada manana. aprobaciones: los botones de las
+      # escrituras. puente solo escribe, edu solo lee, en los dos.
+      NTFY_AUTH_ACCESS: "puente:briefing:wo,puente:aprobaciones:wo,edu:briefing:ro,edu:aprobaciones:ro"
       NTFY_AUTH_TOKENS: "puente:${NTFY_TOKEN_PUBLICAR:?define NTFY_TOKEN_PUBLICAR en .env (ver .env.example)}:agente,edu:${NTFY_TOKEN_SUSCRIBIR:?define NTFY_TOKEN_SUSCRIBIR en .env (ver .env.example)}:movil"
     read_only: true
     tmpfs:

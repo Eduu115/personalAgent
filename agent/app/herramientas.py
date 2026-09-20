@@ -26,7 +26,7 @@ from uuid import UUID
 
 from mcp import types
 
-from . import db
+from . import aprobaciones, db
 from .config import settings
 from .llm import Llamada
 from .mcp_client import Sesion
@@ -43,6 +43,9 @@ RIESGO: dict[str, str] = {
     "mail_buscar": "read",
     "mail_leer": "read",
     "cal_agenda": "read",
+    # Escrituras: no se ejecutan, se encolan y esperan un OK (aprobaciones.py).
+    "mail_borrador": "write",
+    "lab_reiniciar": "sensitive",
 }
 
 # Lo que entra al contexto por llamada. lab_logs con 500 lineas de un
@@ -154,19 +157,38 @@ def permitida(nombre: str, origin: str) -> bool:
     return riesgo is not None and _bloqueo(riesgo, origin) is None
 
 
-def _sobre(nombre: str, estado: str, contenido: str) -> str:
-    sobre: dict[str, Any] = {
+def para_guardar(texto: str, resultado: Any) -> Any:
+    """Lo que se guarda en tool_calls.result, con tope: la tabla no admite DELETE."""
+    if len(texto) <= MAX_GUARDADO:
+        return resultado
+    # Cortado ya no es JSON valido: va como texto, con la marca dentro del
+    # propio JSON para que se vea al consultarlo.
+    return {
+        "truncado": f"se guardan {MAX_GUARDADO} de {len(texto)} caracteres",
+        "parcial": texto[:MAX_GUARDADO],
+    }
+
+
+def sobre(nombre: str, estado: str, contenido: str) -> str:
+    envoltorio: dict[str, Any] = {
         "origen": f"herramienta {nombre}",
         "estado": estado,
         "aviso": AVISO,
         "contenido": contenido[:MAX_CARACTERES],
     }
     if len(contenido) > MAX_CARACTERES:
-        sobre["truncado"] = (
+        envoltorio["truncado"] = (
             f"Se muestran {MAX_CARACTERES} de {len(contenido)} caracteres; el resto "
             "se ha cortado. Si hace falta mas, pide menos cantidad (por ejemplo, menos lineas)."
         )
-    return json.dumps(sobre, ensure_ascii=False)
+    return json.dumps(envoltorio, ensure_ascii=False)
+
+
+@dataclass
+class Resultado:
+    status: str
+    sobre: str  # lo que ve el modelo; vacio si quedo pendiente de aprobacion
+    pendiente: dict[str, Any] | None = None  # la fila en cola, si status == "pending"
 
 
 async def ejecutar(
@@ -178,8 +200,8 @@ async def ejecutar(
     model: str,
     rechazo: str | None = None,
     origin: str = "user",
-) -> tuple[str, str]:
-    """Decide, ejecuta y audita una llamada. Devuelve (status, sobre para el modelo).
+) -> Resultado:
+    """Decide, ejecuta y audita una llamada.
 
     `rechazo` la bloquea sin mirar nada mas (p. ej. el tope de rondas).
     `origin` es quien dio la orden: "user" desde la consola, "schedule" las
@@ -205,6 +227,13 @@ async def ejecutar(
         # No se ejecuta: el error vuelve al modelo para que corrija y reintente.
         status = "failed"
         error = f"los argumentos no son un objeto JSON valido: {llamada.crudo[:500]!r}"
+    elif riesgo != "read":
+        # Una escritura no se ejecuta aqui: se encola y espera el OK de Edu. La
+        # fila la crea la cola, asi que esta salida no pasa por log_tool_call.
+        fila = await aprobaciones.encolar(
+            llamada, conversation_id=conversation_id, riesgo=riesgo, model=model
+        )
+        return Resultado("pending", "", fila)
     else:
         try:
             fallo, texto = await sesiones[ruta[llamada.nombre]].invocar(llamada.nombre, llamada.argumentos)
@@ -221,13 +250,7 @@ async def ejecutar(
                 status, error, resultado = "failed", texto, None
             else:
                 status = "executed"
-                if len(texto) > MAX_GUARDADO:
-                    # Cortado ya no es JSON valido: va como texto, con la marca
-                    # dentro del propio JSON para que se vea al consultarlo.
-                    resultado = {
-                        "truncado": f"se guardan {MAX_GUARDADO} de {len(texto)} caracteres",
-                        "parcial": texto[:MAX_GUARDADO],
-                    }
+                resultado = para_guardar(texto, resultado)
 
     await db.log_tool_call(
         llamada.nombre,
@@ -242,4 +265,4 @@ async def ejecutar(
         origin=origin,
     )
     # error solo es None cuando se ejecuto bien, y entonces texto existe
-    return status, _sobre(llamada.nombre, status, error if error is not None else texto)
+    return Resultado(status, sobre(llamada.nombre, status, error if error is not None else texto))

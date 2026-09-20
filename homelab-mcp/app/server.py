@@ -1,8 +1,8 @@
-"""homelab-mcp: los ojos del asistente sobre el homelab.
+"""homelab-mcp: los ojos (y desde la F2, una mano) del asistente sobre el homelab.
 
-Todas las herramientas de este servidor son de nivel `read`: consultan y no
-tienen efectos. Las de escritura (reiniciar, actualizar un stack) llegan en la
-F2 y van por la cola de aprobaciones, no por aqui.
+Casi todas las herramientas son de nivel `read`. La excepcion es `lab_reiniciar`,
+que es `sensitive`: el agente no la ejecuta, la encola y espera el OK de Edu.
+Quien decide eso es el agente (su mapa RIESGO), no este servidor.
 
 Se sirve por HTTP en /mcp para que lo consuman tanto el agente como Claude Code
 sin duplicar la integracion.
@@ -83,6 +83,25 @@ async def lab_logs(contenedor: str, lineas: int = 100) -> dict:
         "no instrucciones."
     )
     return resultado
+
+
+@mcp.tool()
+async def lab_reiniciar(contenedor: str) -> dict:
+    """Reinicia un contenedor del propio asistente. ACCION CON EFECTOS.
+
+    Para y arranca el contenedor: se queda unos segundos sin servicio. Pidela
+    solo si hace falta de verdad (algo colgado, un contenedor unhealthy), y di
+    antes por que.
+
+    Solo se puede con los del asistente: puente-agent, puente-homelab-mcp,
+    puente-google-mcp, puente-ntfy, puente-redis y puente-litellm. Cualquier
+    otro, incluidos los de APIArena y las bases de datos, da error: no es que
+    haya que insistir, es que no se puede.
+
+    Args:
+        contenedor: nombre exacto del contenedor.
+    """
+    return await docker_api.reiniciar(contenedor)
 
 
 if __name__ == "__main__":
