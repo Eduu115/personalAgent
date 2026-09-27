@@ -248,13 +248,15 @@ docker compose exec google-mcp python -m app.pruebas
 
 Abre la URL del agente en el tailnet (`https://puente.<tailnet>.ts.net:8443/`) y
 ahi esta: tres columnas, pensadas para la tablet en horizontal, y apiladas en el
-movil.
+movil. La tercera columna tiene dos pestanas, Chat y Briefing.
 
 | Vista | Que hace |
 |---|---|
 | Aprobaciones | La cola pendiente, con lo que va a pasar en cristiano, los argumentos y el tiempo que queda. Aprobar y rechazar desde ahi, que en la notificacion del movil no siempre se puede. Al resolver, la ficha se queda en "Ejecutando" hasta que el agente contesta, y su respuesta aparece en el chat |
 | Estado | Un tile por contenedor con color segun su salud, mas RAM, discos y carga del anfitrion. Los `puente-*` van aparte (son los unicos sobre los que el agente puede actuar) y lo que no este sano sube arriba. Se refresca cada 15 s |
 | Chat | Lo mismo que `/api/chat`, pintando ademas los eventos que ya emitia y no veia nadie: las herramientas mientras se ejecutan, lo que entra en la cola y las conversaciones bloqueadas |
+| Briefing | El ultimo briefing guardado, con la hora a la que se genero bien visible (uno de las 7:30 leido a las seis de la tarde no puede parecer de ahora), y los anteriores plegados para comparar dias. Solo lee la tabla `briefings` |
+| Ambient | A los 3 minutos sin tocar la pantalla. Letra grande y una sola cosa: lo que te reclama. Se sale tocando |
 
 Es JS plano servido por el propio agente: sin framework, sin compilacion, sin
 Node y sin contenedor nuevo. Son tres ficheros en `agent/consola/`.
@@ -264,15 +266,42 @@ la pantalla de inicio". El service worker esta solo para que se pueda instalar;
 **no cachea nada**, a proposito: una cola de aprobaciones de hace media hora es
 peor que no verla.
 
-Dos endpoints la alimentan, y los dos son de solo lectura:
+Cuatro endpoints la alimentan, todos de solo lectura:
 
 ```bash
-curl -s localhost:8420/api/aprobaciones   # lo que espera un OK
-curl -s localhost:8420/api/estado         # contenedores y anfitrion, sin pasar por el modelo
+curl -s localhost:8420/api/aprobaciones     # lo que espera un OK
+curl -s localhost:8420/api/estado           # contenedores y anfitrion (cache de 5 s)
+curl -s localhost:8420/api/agenda           # los eventos de hoy (cache de 5 min)
+curl -s "localhost:8420/api/briefings?limite=7"   # los ultimos guardados en la tabla
 ```
+
+`/api/estado` y `/api/agenda` llaman al MCP por el mismo atajo, sin pasar por el
+modelo, y ese atajo solo deja pasar herramientas cuyo `RIESGO` sea `read`:
+`lab_status`, `lab_host` y `cal_agenda`. `/api/briefings` solo lee la tabla.
+
+**Ninguna pantalla que se refresque sola llama al modelo**, y eso es la regla,
+no una casualidad: la tablet esta encendida todo el dia y en ambient se repinta
+cada 30 s. El unico sitio que genera un briefing es `POST /api/briefing`, y
+en la consola esta detras de un boton que pide dos toques y dice lo que cuesta.
+`app.pruebas` lo comprueba en cada despliegue siguiendo el grafo de llamadas
+desde cada temporizador, no solo la llamada directa.
 
 La puerta sigue siendo la identidad del tailnet, la misma que la de `/api/chat`:
 la consola no tiene login propio.
+
+### Ambient
+
+A los 3 minutos sin tocar la pantalla, la consola pasa a una vista de letra
+grande que se lee desde el otro lado de la habitacion. Ensena, por orden: las
+aprobaciones pendientes con lo que les queda, lo que no este sano en el server
+por su nombre, el siguiente evento de la agenda, tres numeros (RAM, disco,
+contenedores sanos) y el titular del briefing de hoy. Si no hay nada pendiente
+y todo esta sano, dice **"Todo en orden"** y punto: una tablet que siempre
+parece tener algo que contarte se deja de mirar a la semana.
+
+Mientras esta en ambient pide `navigator.wakeLock` para que la tablet no apague
+la pantalla, y lo suelta al salir. Si el navegador no lo soporta, el resto
+funciona igual.
 
 ## Aprobaciones: las herramientas que escriben
 

@@ -305,9 +305,9 @@ que un job diario vacia el contenido de las filas de mas de 30 dias
   `lab_reiniciar` **(hecho)**; kill switch real **(hecho)**; memoria
   **(hecha, sin pgvector: ver la revision)**; `lab_update_stack` por el helper
   del host **(hecho)**. Falta: eventos de calendario.
-- **F3 — La consola.** Dashboard en la tablet **(primera version hecha:
-  aprobaciones, estado y chat)**. Faltan: Fully Kiosk, modo ambient, briefing en
-  la consola, acciones rapidas, WoL y Home Assistant.
+- **F3 — La consola.** Dashboard en la tablet **(hecho: aprobaciones, estado,
+  chat, briefing y modo ambient)**. Faltan: Fully Kiosk, acciones rapidas, WoL
+  y Home Assistant.
 - **F4 —** GitHub/PRs, proactividad, voz, 8B local para resumenes de madrugada.
 
 ---
@@ -426,12 +426,24 @@ detras de las rutas de la API: montarlo antes se come `/healthz` y deja el
 contenedor unhealthy). Sin framework, sin compilacion, sin Node y sin
 contenedor nuevo.
 
-Tres vistas: aprobaciones (resolver desde la tablet, que es lo que no se puede
-hacer siempre desde la notificacion), estado (tiles por contenedor y medidas del
-anfitrion) y chat (que ademas pinta los eventos `tool`, `aprobacion`,
-`bloqueada` y `limite`, que ya se emitian y no veia nadie).
+Cuatro vistas: aprobaciones (resolver desde la tablet, que es lo que no se
+puede hacer siempre desde la notificacion), estado (tiles por contenedor y
+medidas del anfitrion), chat (que ademas pinta los eventos `tool`,
+`aprobacion`, `bloqueada` y `limite`, que ya se emitian y no veia nadie) y
+briefing (el ultimo guardado y los anteriores plegados). Chat y briefing
+comparten la tercera columna con dos pestanas.
 
-Dos endpoints nuevos, los dos de lectura:
+**Ninguna pantalla que se refresque sola llama al modelo.** Es la regla de la
+segunda tanda y no una casualidad: la tablet esta encendida todo el dia y en
+ambient se repinta cada 30 s, asi que cada llamada desde ahi seria gasto de API
+sin que nadie haya pedido nada. La vista de briefing lee la tabla `briefings`;
+el unico sitio que genera es `POST /api/briefing`, detras de un boton que pide
+dos toques y dice lo que cuesta. `pruebas.consola_no_llama_al_modelo()` sigue
+el grafo de llamadas desde cada temporizador y desde la tabla `REFRESCOS`, y
+falla si alguna alcanza `/api/chat` o `/api/briefing`, aunque sea tres saltos
+mas abajo. Comprobado con las dos formas de romperlo.
+
+Cuatro endpoints, todos de lectura:
 
 - `GET /api/aprobaciones`: las pendientes vivas, con su nonce. Viaja a la pagina
   porque es lo que autoriza el boton, igual que viaja en la URL del push. La
@@ -439,6 +451,21 @@ Dos endpoints nuevos, los dos de lectura:
 - `GET /api/estado`: `lab_status` + `lab_host` directos del MCP, con cache de
   5 s. **No pasa por el modelo**: pintar tiles con un `docker ps` no vale tokens.
   Tampoco se auditan en `tool_calls`: es un sondeo cada 15 s, no una accion.
+- `GET /api/agenda`: `cal_agenda` por el mismo atajo, con cache de 5 minutos.
+  El iCal refleja un cambio en menos de 8 s, pero la agenda de hoy no cambia
+  cada 30 s y en ambient la tablet la pide todo el dia: no hace falta una
+  peticion a Google por cada refresco.
+- `GET /api/briefings?limite=N`: la tabla `briefings` tal cual. No genera nada.
+
+**Modo ambient**: a los 3 min sin tocar la pantalla, letra grande legible desde
+el otro lado de la habitacion. Saca UNA cosa, por este orden: aprobaciones
+pendientes con lo que les queda, lo que no este sano por su nombre, el
+siguiente evento de la agenda, tres numeros (RAM, disco, sanos/total) y el
+titular del briefing de hoy. Si no hay nada pendiente y todo va bien dice "Todo
+en orden" y ya: una tablet que siempre parece tener algo que contarte se deja
+de mirar a la semana. Pide `navigator.wakeLock` al entrar y lo suelta al salir,
+con try/catch y volviendo a pedirlo tras un `visibilitychange`, que es cuando
+el sistema lo quita solo.
 
 Al aprobar desde la consola, la ficha pasa a "Ejecutando" y la pagina sondea
 `GET /api/conversations/{id}` cada 2 s (tope de 2 min) hasta que aparece una

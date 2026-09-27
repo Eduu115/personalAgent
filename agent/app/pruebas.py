@@ -17,6 +17,7 @@ import ast
 import asyncio
 import importlib
 import pkgutil
+import re
 from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -255,6 +256,46 @@ def consola() -> None:
     print("OK consola: pagina, manifest, service worker e iconos; /healthz intacto")
 
 
+def consola_no_llama_al_modelo() -> None:
+    """Ningun refresco automatico de la consola llama al modelo.
+
+    La tablet esta encendida todo el dia y en ambient se repinta sola: un
+    setInterval que acabe tocando /api/chat o /api/briefing es gasto de API sin
+    que nadie haya pedido nada. Se mira el cierre transitivo, no la llamada
+    directa: vale igual que la que pague sea una funcion tres saltos mas abajo.
+    """
+    fuente = (AQUI.parent / "consola" / "index.html").read_text()
+    cuerpos = dict(re.findall(r"^(?:async )?function (\w+)\([^)]*\) \{\n(.*?)^\}", fuente, re.S | re.M))
+    assert len(cuerpos) > 12, f"el parser de funciones solo ha visto {len(cuerpos)}: se ha quedado corto"
+
+    # Las que cuestan dinero. /api/briefings (en plural) solo lee la tabla.
+    caras = {n for n, cuerpo in cuerpos.items() if re.search(r"/api/(chat|briefing)(?!s)", cuerpo)}
+    assert caras == {"enviar", "generarBriefing"}, f"llaman al modelo: {sorted(caras)}"
+    sueltas = re.findall(r"/api/(?:chat|briefing)(?!s)", fuente)
+    assert len(sueltas) == 2, f"hay {len(sueltas)} usos de /api/chat o /api/briefing, y solo 2 estan en una funcion"
+
+    # De donde arranca solo: la tabla de refrescos y cualquier temporizador.
+    tabla = re.search(r"const REFRESCOS = \{(.*?)\n\};", fuente, re.S)
+    assert tabla, "falta la tabla REFRESCOS: sin ella esto no comprueba nada"
+    raices = set(re.findall(r"\[(\w+),", tabla.group(1)))
+    assert {"cargarAprobaciones", "cargarEstado", "cargarAgenda", "cargarBriefings"} <= raices, raices
+    for linea in re.findall(r"set(?:Interval|Timeout)\((.*)$", fuente, re.M):
+        raices |= set(re.findall(r"\w+", linea))   # tambien lo que haya en una flecha en linea
+
+    alcanzables: set[str] = set()
+    por_ver = [r for r in raices if r in cuerpos]
+    while por_ver:
+        nombre = por_ver.pop()
+        if nombre in alcanzables:
+            continue
+        alcanzables.add(nombre)
+        por_ver += [m for m in re.findall(r"(\w+)\(", cuerpos[nombre]) if m in cuerpos]
+
+    culpables = alcanzables & caras
+    assert not culpables, f"un refresco automatico acaba llamando al modelo: {sorted(culpables)}"
+    print(f"OK consola: {len(alcanzables)} funciones se refrescan solas y ninguna llama al modelo")
+
+
 def rutas() -> None:
     """Las rutas que abren los botones del push siguen existiendo."""
     caminos = {r.path for r in main.app.routes}
@@ -263,6 +304,8 @@ def rutas() -> None:
         "/api/briefing",
         "/api/aprobaciones",
         "/api/estado",
+        "/api/agenda",
+        "/api/briefings",
         "/api/aprobaciones/{tool_call_id}/aprobar",
         "/api/aprobaciones/{tool_call_id}/rechazar",
         "/healthz",
@@ -278,6 +321,7 @@ if __name__ == "__main__":
     query_del_briefing()
     rutas()
     consola()
+    consola_no_llama_al_modelo()
     asyncio.run(atajo_del_estado())
     asyncio.run(catalogo_propio())
     asyncio.run(candados_memoria())

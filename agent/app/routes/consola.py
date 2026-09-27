@@ -4,8 +4,11 @@ La puerta sigue siendo la identidad del tailnet, la misma que la de /api/chat:
 aqui no hay ningun mecanismo de sesion nuevo. El nonce viaja a la pagina porque
 es lo que autoriza el boton, igual que viaja en la URL del push del movil.
 
-/api/estado no pasa por el modelo a proposito: pintar unos tiles con lo que
-devuelve un `docker ps` no vale tokens.
+Nada de aqui llama al modelo, y eso es la regla, no una casualidad: son
+pantallas que se refrescan solas en una tablet encendida todo el dia. Pintar
+unos tiles con lo que devuelve un `docker ps` no vale tokens, y la vista de
+Briefing lee la tabla `briefings` en vez de generar uno. El unico sitio que
+genera es POST /api/briefing, y ese lo pulsa una persona.
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from .. import aprobaciones, db, herramientas, mcp_client
+from ..config import settings
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["consola"])
@@ -27,7 +31,20 @@ router = APIRouter(prefix="/api", tags=["consola"])
 # La tablet refresca cada 15 s; con varias pestanas abiertas, esto evita
 # repetir la misma consulta al MCP por cada una.
 _TTL_ESTADO = 5.0
-_cache: dict[str, Any] = {"ts": 0.0, "datos": None}
+# La agenda sale de un feed iCal que hay que bajar de Google. Los eventos de hoy
+# no cambian cada 30 s, y en ambient la tablet la pide todo el dia: 5 min.
+_TTL_AGENDA = 300.0
+_cache: dict[str, tuple[float, Any]] = {}
+
+
+async def _cacheado(clave: str, ttl: float, calcular) -> Any:
+    """Lo de la ultima vez si es reciente. Un fallo no se cachea: se reintenta."""
+    guardado = _cache.get(clave)
+    if guardado and time.monotonic() - guardado[0] < ttl:
+        return guardado[1]
+    datos = await calcular()
+    _cache[clave] = (time.monotonic(), datos)
+    return datos
 
 
 @router.get("/aprobaciones")
@@ -75,30 +92,69 @@ async def _leer(sesiones: dict[str, Any], ruta: dict[str, str], nombre: str) -> 
     return json.loads(texto)
 
 
-@router.get("/estado")
-async def estado():
-    """Contenedores y anfitrion, directo del MCP. Sin modelo por medio."""
-    if _cache["datos"] is not None and time.monotonic() - _cache["ts"] < _TTL_ESTADO:
-        return _cache["datos"]
-
+async def _del_mcp(*nombres: str) -> list[Any]:
+    """Varias herramientas de lectura del MCP a la vez, sin modelo por medio."""
     sesiones = mcp_client.sesiones()
     try:
         catalogo = await herramientas.ofrecidas(sesiones)
-        contenedores, anfitrion = await asyncio.gather(
-            _leer(sesiones, catalogo.ruta, "lab_status"),
-            _leer(sesiones, catalogo.ruta, "lab_host"),
-        )
-    except Exception as exc:
-        log.warning("no se pudo leer el estado para la consola: %s", exc)
-        return JSONResponse({"error": str(exc) or type(exc).__name__}, status_code=503)
+        return list(await asyncio.gather(*(_leer(sesiones, catalogo.ruta, n) for n in nombres)))
     finally:
         await mcp_client.cerrar(sesiones)
 
-    datos = {
+
+async def _estado() -> dict[str, Any]:
+    contenedores, anfitrion = await _del_mcp("lab_status", "lab_host")
+    return {
         "docker": contenedores.get("docker", {}),
         "contenedores": contenedores.get("contenedores", []),
         "host": anfitrion,
         "ts": time.time(),
     }
-    _cache.update(ts=time.monotonic(), datos=datos)
+
+
+@router.get("/estado")
+async def estado():
+    """Contenedores y anfitrion, directo del MCP. Sin modelo por medio."""
+    try:
+        return await _cacheado("estado", _TTL_ESTADO, _estado)
+    except Exception as exc:
+        log.warning("no se pudo leer el estado para la consola: %s", exc)
+        return JSONResponse({"error": str(exc) or type(exc).__name__}, status_code=503)
+
+
+async def _agenda() -> dict[str, Any]:
+    (datos,) = await _del_mcp("cal_agenda")   # dias=1 por defecto: hoy
     return datos
+
+
+@router.get("/agenda")
+async def agenda():
+    """Los eventos de hoy, por el mismo camino que /api/estado. Sin modelo."""
+    try:
+        return await _cacheado("agenda", _TTL_AGENDA, _agenda)
+    except Exception as exc:
+        log.warning("no se pudo leer la agenda para la consola: %s", exc)
+        return JSONResponse({"error": str(exc) or type(exc).__name__}, status_code=503)
+
+
+@router.get("/briefings")
+async def briefings(limite: int = 5):
+    """Los ultimos briefings GUARDADOS. Solo lee la tabla: no genera ninguno.
+
+    Generar uno cuesta una llamada al modelo con varias rondas de herramientas.
+    Esta vista se refresca sola, asi que aqui no se genera nada; para eso esta
+    el boton, que llama a POST /api/briefing y lo pulsa una persona.
+    """
+    filas = await db.ultimos_briefings(max(1, min(limite, 20)))
+    return {
+        "zona": settings.zona_horaria,
+        "briefings": [
+            {
+                "id": f["id"],
+                "creado_en": f["creado_en"].isoformat(),
+                "resumen": f["resumen"],
+                "publicado": f["publicado"],
+            }
+            for f in reversed(filas)   # la consulta los da del mas viejo al mas nuevo
+        ],
+    }
