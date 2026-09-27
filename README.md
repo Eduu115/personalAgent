@@ -331,18 +331,25 @@ Al acabar te dice el `HELPER_GID` que tienes que poner en el `.env`.
 Despues, en `/etc/puente/stacks.conf`, una linea por stack:
 
 ```
-nextcloud=/home/edu/apps/nextcloud
+paperless=/home/edu/apps/paperless
 ```
 
 y en el `.env` del proyecto, los que quieras que el agente pueda tocar:
 
 ```
-STACKS_ACTUALIZABLES=nextcloud
+STACKS_ACTUALIZABLES=paperless
 HELPER_GID=<el que dijo el instalador>
 ```
 
-Sin `STACKS_ACTUALIZABLES`, la herramienta no existe para el agente. `apiarena`
-y `puente` no se actualizan nunca, aunque los pongas en `stacks.conf`.
+Sin `STACKS_ACTUALIZABLES`, la herramienta no existe para el agente.
+
+`apiarena`, `puente` y `nextcloud` no se actualizan nunca, aunque los pongas en
+`stacks.conf`: la lista esta en el codigo del helper y se mira tres veces (la
+clave, el directorio al que apunta y los servicios que define ese compose, por
+si una clave inocente apunta a un compose que levante nextcloud). Nextcloud
+guarda las fotos de casa y solo migra el esquema de una version mayor a la
+siguiente: un `pull` a ciegas que salte dos deja la base a medias. Ese se
+actualiza a mano.
 
 ### Mirarlo, pararlo y desinstalarlo
 

@@ -388,10 +388,24 @@ componente del proyecto fuera del sandbox, y estos son sus limites:
 - **Una sola operacion util**: `actualizar(stack)`. Nunca una ruta, ni un
   comando, ni un fichero compose. `stack` es una CLAVE de
   `/etc/puente/stacks.conf` (root, 600, fuera del repo).
-- **Exclusiones en el codigo, no en la configuracion**: `apiarena` (produccion)
-  y `puente` (se mataria a si mismo a mitad y dejaria la aprobacion colgada).
-  Aunque alguien las meta en `stacks.conf`, se niega. `deploy.sh` lo comprueba
-  con una configuracion falsa en cada despliegue.
+- **Exclusiones en el codigo, no en la configuracion**: `apiarena`
+  (produccion), `puente` (se mataria a si mismo a mitad y dejaria la aprobacion
+  colgada) y `nextcloud` (fotos familiares irreemplazables, y Nextcloud solo
+  migra el esquema de una version mayor a la siguiente: un pull a ciegas que
+  salte dos deja la base a medias). Aunque alguien las meta en `stacks.conf`,
+  se niega. Y se mira tres veces: la clave, el directorio al que apunta
+  (`realpath`) y los servicios que declara ese compose
+  (`compose config --services`), por si una clave inocente apunta a un compose
+  que levante nextcloud. Si el compose no se puede leer, tampoco se actualiza.
+  `deploy.sh` comprueba los cuatro casos con una configuracion falsa en cada
+  despliegue.
+- **No borra nada.** Los unicos comandos que ejecuta son `docker compose ps`,
+  `config --services`, `pull`, `up -d` y `docker image inspect`, siempre como
+  lista de argumentos y nunca por shell. Ni `down`, ni `rm`, ni `prune`, ni
+  ninguna opcion de volumenes. `--remove-orphans` estuvo en el `up` hasta el
+  27/9 y se quito: borra contenedores del proyecto que ya no esten en el
+  compose, y aqui no se borra nada. Un contenedor huerfano se queda y se mira;
+  un contenedor borrado no vuelve.
 - **El permiso es el socket**: root:`puente-helper`, modo 660. Ni puerto ni
   token. Quien este en ese grupo puede pedirlo, y eso es `homelab-mcp` por
   `group_add`.

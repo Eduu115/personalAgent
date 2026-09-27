@@ -292,22 +292,37 @@ else
         *'"ok": false'*) echo "helper: un stack fuera de su mapa, rechazado" ;;
         *) fallo "el helper NO rechaza un stack desconocido" ;;
     esac
-    # La que importa: apiarena se rechaza AUNQUE este en la configuracion. Se
-    # prueba con una config falsa y una instancia aparte, sin tocar la de verdad.
+    # Las que importan: los excluidos se rechazan AUNQUE esten en la
+    # configuracion. Se prueba con una config falsa y una instancia aparte, sin
+    # tocar la de verdad. 'disfrazado' es una clave inocente que apunta a un
+    # compose que define nextcloud: eso tambien se rechaza.
     conf_prueba="$(mktemp)"
     sock_prueba="/tmp/puente-helper-prueba.sock"
-    printf 'apiarena=/tmp\npuente=/tmp\n' > "$conf_prueba"
+    dir_prueba="$(mktemp -d)"
+    printf 'services:\n  nextcloud:\n    image: alpine\n' > "$dir_prueba/docker-compose.yml"
+    printf 'apiarena=/tmp\npuente=/tmp\nnextcloud=/tmp\ndisfrazado=%s\n' "$dir_prueba" > "$conf_prueba"
     rm -f "$sock_prueba"
     PUENTE_STACKS="$conf_prueba" PUENTE_SOCKET="$sock_prueba" python3 helper/puente_helper.py >/dev/null 2>&1 &
     prueba_pid=$!
     sleep 1
-    veredicto="$(preguntar_helper "$sock_prueba" '{"op":"actualizar","stack":"apiarena"}' || true)"
-    kill "$prueba_pid" 2>/dev/null || true
-    rm -f "$conf_prueba" "$sock_prueba"
+    malas=""
+    for excluido in apiarena puente nextcloud; do
+        veredicto="$(preguntar_helper "$sock_prueba" "{\"op\":\"actualizar\",\"stack\":\"$excluido\"}" || true)"
+        case "$veredicto" in
+            *'"ok": false'*) echo "helper: '$excluido' rechazado aunque este en su configuracion" ;;
+            *) malas="$malas $excluido" ;;
+        esac
+    done
+    # Aqui no vale un "ok": false cualquiera: tiene que rechazarlo por el
+    # servicio que define, no porque el compose no se pudiera leer.
+    veredicto="$(preguntar_helper "$sock_prueba" '{"op":"actualizar","stack":"disfrazado"}' || true)"
     case "$veredicto" in
-        *'"ok": false'*) echo "helper: apiarena rechazada aunque este en su configuracion" ;;
-        *) fallo "EL HELPER ACTUALIZARIA APIARENA si alguien la mete en stacks.conf: $veredicto" ;;
+        *'"ok": false'*define*nextcloud*) echo "helper: un compose que define nextcloud, rechazado" ;;
+        *) malas="$malas un-compose-con-nextcloud-dentro($veredicto)" ;;
     esac
+    kill "$prueba_pid" 2>/dev/null || true
+    rm -rf "$conf_prueba" "$sock_prueba" "$dir_prueba"
+    [ -z "$malas" ] || fallo "EL HELPER ACTUALIZARIA:$malas"
 fi
 
 # El reinicio de prueba de ntfy lo deja arrancando: que vuelva a estar sano.
