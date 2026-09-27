@@ -296,6 +296,90 @@ def consola_no_llama_al_modelo() -> None:
     print(f"OK consola: {len(alcanzables)} funciones se refrescan solas y ninguna llama al modelo")
 
 
+def wol_no_es_herramienta() -> None:
+    """Encender el PC no es una herramienta. Es la mitad del diseno, asi que se mira.
+
+    Si algun dia aparece en el mapa de riesgo o entre las propias del agente, el
+    modelo la vera en su catalogo y bastara con que un correo le convenza. El
+    boton de la consola tiene que ser el unico camino. deploy.sh comprueba
+    ademas lo que anuncian los servidores MCP de verdad.
+    """
+    from . import acciones, herramientas
+
+    prohibidas = ("despertar", "wol", "encender", "wake")
+    ofrecibles = set(herramientas.RIESGO) | herramientas.PROPIAS
+    culpables = [n for n in ofrecibles if any(p in n.lower() for p in prohibidas)]
+    assert not culpables, f"esto no puede ser una herramienta del modelo: {culpables}"
+
+    original = settings.equipos_despertables
+    try:
+        settings.equipos_despertables = "sobremesa"
+        ids = set(acciones.catalogo())
+        assert ids == {"despertar:sobremesa"}, ids
+        assert not (ids & ofrecibles), "una accion rapida tambien es herramienta: elige una"
+    finally:
+        settings.equipos_despertables = original
+    print(f"OK encender no es herramienta: {len(ofrecibles)} ofrecibles y ninguna despierta nada")
+
+
+async def candado_de_acciones() -> None:
+    """Las acciones rapidas: catalogo cerrado, READ_ONLY las para, todas auditadas.
+
+    No pasan por la cola de aprobaciones a proposito, asi que estas son las
+    unicas barreras que les quedan y no pueden fallar en silencio.
+    """
+    from . import acciones, db
+
+    auditado: list[tuple[str, str, str]] = []
+    pedido: list[tuple[str, dict]] = []
+
+    async def log_falso(nombre, **kw):
+        auditado.append((nombre, kw["status"], kw["origin"]))
+        return 1
+
+    async def helper_falso(op, **kw):
+        pedido.append((op, kw))
+        return {"ok": True, "equipo": kw.get("equipo"), "aviso": "Paquete enviado."}
+
+    async def no_llamar(*_a, **_k):
+        raise AssertionError("con READ_ONLY no puede llegar a hablar con el helper")
+
+    original = (db.log_tool_call, acciones._al_helper, settings.read_only, settings.equipos_despertables)
+    db.log_tool_call = log_falso
+    try:
+        settings.equipos_despertables = "sobremesa, portatil"
+        assert set(acciones.catalogo()) == {"despertar:sobremesa", "despertar:portatil"}
+
+        # Con el kill switch puesto no se ejecuta, pero queda en el audit log.
+        settings.read_only = True
+        acciones._al_helper = no_llamar
+        r = await acciones.ejecutar("despertar:sobremesa")
+        assert not r["ok"] and "solo lectura" in r["error"], r
+        assert auditado == [("despertar:sobremesa", "rejected", "consola")], auditado
+
+        # Sin el, se ejecuta al momento: nada de cola, nada de nonce.
+        settings.read_only = False
+        acciones._al_helper = helper_falso
+        r = await acciones.ejecutar("despertar:portatil")
+        assert r["ok"] and pedido == [("despertar", {"equipo": "portatil"})], (r, pedido)
+        assert auditado[-1] == ("despertar:portatil", "executed", "consola"), auditado
+
+        # Y lo que no este en el catalogo no existe, venga como venga.
+        for fuera in ("despertar:otro", "actualizar:puente", "", "despertar:../../x", "lab_reiniciar"):
+            try:
+                await acciones.ejecutar(fuera)
+            except KeyError:
+                continue
+            raise AssertionError(f"'{fuera}' no esta en el catalogo y se ha ejecutado")
+        assert len(auditado) == 2, f"una accion inexistente no se audita: {auditado}"
+
+        settings.equipos_despertables = ""
+        assert acciones.catalogo() == {}, "sin EQUIPOS_DESPERTABLES no puede haber ninguna accion"
+        print("OK acciones rapidas: catalogo cerrado, READ_ONLY las para y las dos quedan auditadas")
+    finally:
+        (db.log_tool_call, acciones._al_helper, settings.read_only, settings.equipos_despertables) = original
+
+
 def rutas() -> None:
     """Las rutas que abren los botones del push siguen existiendo."""
     caminos = {r.path for r in main.app.routes}
@@ -306,6 +390,8 @@ def rutas() -> None:
         "/api/estado",
         "/api/agenda",
         "/api/briefings",
+        "/api/acciones",
+        "/api/acciones/{accion_id}",
         "/api/aprobaciones/{tool_call_id}/aprobar",
         "/api/aprobaciones/{tool_call_id}/rechazar",
         "/healthz",
@@ -322,8 +408,10 @@ if __name__ == "__main__":
     rutas()
     consola()
     consola_no_llama_al_modelo()
+    wol_no_es_herramienta()
     asyncio.run(atajo_del_estado())
     asyncio.run(catalogo_propio())
     asyncio.run(candados_memoria())
+    asyncio.run(candado_de_acciones())
     asyncio.run(arranque())
     print("todo OK")

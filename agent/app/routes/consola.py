@@ -9,6 +9,9 @@ pantallas que se refrescan solas en una tablet encendida todo el dia. Pintar
 unos tiles con lo que devuelve un `docker ps` no vale tokens, y la vista de
 Briefing lee la tabla `briefings` en vez de generar uno. El unico sitio que
 genera es POST /api/briefing, y ese lo pulsa una persona.
+
+Casi todo esto es de lectura. La excepcion es POST /api/acciones/{id}, que
+ejecuta al momento y sin cola: el porque esta en `acciones.py`.
 """
 
 from __future__ import annotations
@@ -22,7 +25,7 @@ from typing import Any
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from .. import aprobaciones, db, herramientas, mcp_client
+from .. import acciones, aprobaciones, db, herramientas, mcp_client
 from ..config import settings
 
 log = logging.getLogger(__name__)
@@ -158,3 +161,34 @@ async def briefings(limite: int = 5):
             for f in reversed(filas)   # la consulta los da del mas viejo al mas nuevo
         ],
     }
+
+
+# ------------------------------------------------------------------ acciones
+#
+# Lo unico de este fichero que hace algo en vez de mirarlo. No pasa por la cola
+# de aprobaciones porque el boton ES la aprobacion; el porque largo, en
+# acciones.py. Se audita y READ_ONLY lo apaga, eso no se negocia.
+
+
+@router.get("/acciones")
+async def acciones_disponibles() -> dict[str, Any]:
+    """Lo que los botones de la consola pueden hacer. Fijo y corto."""
+    return {
+        "read_only": settings.read_only,
+        "acciones": [
+            {"id": a.id, "etiqueta": a.etiqueta, "detalle": a.detalle, "riesgo": a.riesgo}
+            for a in acciones.catalogo().values()
+        ],
+    }
+
+
+@router.post("/acciones/{accion_id}")
+async def hacer_accion(accion_id: str):
+    """Ejecuta una accion del catalogo. Al pulsar, sin segunda confirmacion."""
+    try:
+        return await acciones.ejecutar(accion_id)
+    except KeyError:
+        # Lo que no este en el catalogo no existe, y no se audita: la fila
+        # llevaria como nombre lo que venga en la URL.
+        log.warning("accion desconocida desde la consola: %r", accion_id[:80])
+        return JSONResponse({"ok": False, "error": "esa acción no existe"}, status_code=404)

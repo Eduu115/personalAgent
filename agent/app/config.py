@@ -103,10 +103,20 @@ class Settings(BaseSettings):
     # A los cuantos dias se vacia el contenido de las llamadas del audit log.
     retencion_dias: int = 30
 
+    # Equipos que el boton de la consola puede encender, separados por comas.
+    # Vacio: no hay ninguna accion rapida. El nombre es una CLAVE de
+    # /etc/puente/equipos.conf del host, donde estan las MAC; aqui no hay
+    # ninguna MAC ni la va a haber. Esto NO es una herramienta del modelo.
+    equipos_despertables: str = ""
+
     # Kill switch. Con READ_ONLY=true el agente responde pero no ejecuta
     # ninguna herramienta con efectos. Lo vas a usar mas de lo que crees.
     read_only: bool = False
 
+
+    @property
+    def equipos(self) -> list[str]:
+        return [e.strip() for e in self.equipos_despertables.split(",") if e.strip()]
 
     @property
     def query_briefing(self) -> str:

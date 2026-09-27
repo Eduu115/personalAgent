@@ -270,13 +270,18 @@ PY
 # El helper del host, si esta configurado. Es el unico componente fuera de los
 # contenedores y el unico que puede recrear contenedores: se comprueba entero.
 STACKS_ACTUALIZABLES="$(sed -n 's/^STACKS_ACTUALIZABLES=//p' .env)"
+EQUIPOS_DESPERTABLES="$(sed -n 's/^EQUIPOS_DESPERTABLES=//p' .env)"
 HELPER_SOCKET="$(sed -n 's/^HELPER_SOCKET=//p' .env)"
 HELPER_SOCKET="${HELPER_SOCKET:-/run/puente/helper.sock}"
 preguntar_helper() {
     python3 scripts/helper_cli.py "$1" "$2"
 }
-if [ -z "$STACKS_ACTUALIZABLES" ]; then
-    echo "helper del host: sin configurar (lab_update_stack no existe)"
+# Que capacidades estan apagadas se DICE, no se calla: una variable vacia que
+# nadie menciona es una tarde buscando por que no pasa nada al pulsar.
+[ -n "$STACKS_ACTUALIZABLES" ] || echo "helper: STACKS_ACTUALIZABLES vacio -> lab_update_stack no existe para el agente"
+[ -n "$EQUIPOS_DESPERTABLES" ] || echo "helper: EQUIPOS_DESPERTABLES vacio -> la consola no tiene boton de encender"
+if [ -z "$STACKS_ACTUALIZABLES" ] && [ -z "$EQUIPOS_DESPERTABLES" ]; then
+    echo "helper del host: sin configurar, no se comprueba"
 else
     [ -S "$HELPER_SOCKET" ] || fallo "no existe el socket del helper en $HELPER_SOCKET: ./scripts/instalar_helper.sh"
     permisos="$(stat -Lc '%U %G %a' "$HELPER_SOCKET")"
@@ -284,7 +289,8 @@ else
         "root "*" 660") echo "helper: socket $HELPER_SOCKET ($permisos)" ;;
         *) fallo "el socket del helper tiene permisos '$permisos', se esperaba 'root <grupo> 660'" ;;
     esac
-    case "$(preguntar_helper "$HELPER_SOCKET" '{"op":"ping"}')" in
+    saludo="$(preguntar_helper "$HELPER_SOCKET" '{"op":"ping"}')"
+    case "$saludo" in
         *'"ok": true'*) echo "helper: responde al ping" ;;
         *) fallo "el helper no contesta: journalctl -u puente-helper -n 30" ;;
     esac
@@ -292,6 +298,18 @@ else
         *'"ok": false'*) echo "helper: un stack fuera de su mapa, rechazado" ;;
         *) fallo "el helper NO rechaza un stack desconocido" ;;
     esac
+    case "$(preguntar_helper "$HELPER_SOCKET" '{"op":"despertar","equipo":"no-existe-este-equipo"}')" in
+        *'"ok": false'*) echo "helper: un equipo fuera de su mapa, rechazado" ;;
+        *) fallo "el helper NO rechaza un equipo desconocido" ;;
+    esac
+    # Lo que este en el .env tiene que estar tambien en /etc/puente/equipos.conf
+    # del host, o el boton falla el dia que lo pulses y no antes.
+    for equipo in $(printf '%s' "$EQUIPOS_DESPERTABLES" | tr ',' ' '); do
+        case "$saludo" in
+            *"\"$equipo\""*) echo "helper: '$equipo' esta en equipos.conf" ;;
+            *) fallo "'$equipo' esta en EQUIPOS_DESPERTABLES pero el helper no lo conoce: falta en /etc/puente/equipos.conf" ;;
+        esac
+    done
     # Las que importan: los excluidos se rechazan AUNQUE esten en la
     # configuracion. Se prueba con una config falsa y una instancia aparte, sin
     # tocar la de verdad. 'disfrazado' es una clave inocente que apunta a un
@@ -324,6 +342,32 @@ else
     rm -rf "$conf_prueba" "$sock_prueba" "$dir_prueba"
     [ -z "$malas" ] || fallo "EL HELPER ACTUALIZARIA:$malas"
 fi
+
+# Encender el PC no es una herramienta y no puede llegar a serlo por descuido:
+# si apareciera en tools/list, el modelo la veria en su catalogo y bastaria con
+# que un correo le convenciera. Se mira lo que ANUNCIAN los servidores, no lo
+# que el agente acepta: el filtro del mapa de riesgo la taparia.
+docker compose exec -T agent python - <<'TOOLS' || fallo "encender el PC no puede ser una herramienta MCP"
+import asyncio, sys
+from app import mcp_client
+
+async def main():
+    sesiones = mcp_client.sesiones()
+    try:
+        anunciadas = []
+        for servidor, sesion in sesiones.items():
+            anunciadas += [t.name for t in await sesion.listar()]
+    finally:
+        await mcp_client.cerrar(sesiones)
+    print("  herramientas anunciadas: " + ", ".join(sorted(anunciadas)))
+    malas = [n for n in anunciadas if any(p in n.lower() for p in ("despertar", "wol", "encender", "wake"))]
+    if malas:
+        print("  ERROR: esto no puede ser una herramienta: " + ", ".join(malas))
+        sys.exit(1)
+    print("  ninguna deja encender nada: el boton de la consola es el unico camino")
+
+asyncio.run(main())
+TOOLS
 
 # El reinicio de prueba de ntfy lo deja arrancando: que vuelva a estar sano.
 docker compose up -d --wait ntfy >/dev/null
