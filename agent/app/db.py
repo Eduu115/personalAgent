@@ -209,11 +209,16 @@ async def guardar_briefing(resumen: str, publicado: bool) -> int:
 
 
 async def ultimos_briefings(cuantos: int) -> list[dict[str, Any]]:
-    """Los ultimos, para que el de hoy no repita lo que conto el de ayer."""
+    """Los ultimos, del mas viejo al mas nuevo.
+
+    Dos consumidores: el briefing de manana, para no repetir lo que conto el de
+    hoy, y la vista de la consola, que los pinta al reves.
+    """
     async with pool().connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT creado_en, resumen FROM briefings ORDER BY creado_en DESC LIMIT %s",
+                "SELECT id, creado_en, resumen, publicado FROM briefings "
+                "ORDER BY creado_en DESC LIMIT %s",
                 (cuantos,),
             )
             return list(reversed(await cur.fetchall()))

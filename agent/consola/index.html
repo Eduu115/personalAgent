@@ -103,6 +103,51 @@ textarea {
 }
 form button { flex: 0 0 auto; }
 
+/* --- pestanas de la tercera columna: chat y briefing comparten sitio --- */
+.pestanas { padding-right: 8px; }
+button.pestana {
+  flex: 0 0 auto; min-height: 0; padding: 4px 10px; font-size: 12px; text-transform: uppercase;
+  letter-spacing: .8px; color: var(--suave); background: none; border-color: transparent;
+}
+button.pestana.activa { color: var(--texto); background: #1d242d; border-color: var(--borde); }
+.panel { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.panel.oculto { display: none; }
+
+/* --- briefing --- */
+.sello { font-size: 17px; font-weight: 600; margin: 4px 0 2px; }
+.sello + .desde { color: var(--suave); font-size: 12.5px; margin-bottom: 10px; }
+.resumen { white-space: pre-wrap; word-wrap: break-word; }
+.sin-push { color: var(--ojo); font-size: 12.5px; margin-top: 8px; }
+details { border-top: 1px solid var(--borde); padding: 8px 0; }
+details summary { cursor: pointer; color: var(--suave); font-size: 13px; }
+details .resumen { margin-top: 8px; font-size: 13.5px; color: var(--suave); }
+.pie { padding: 10px 14px 14px; border-top: 1px solid var(--borde); }
+button.generar { background: none; border-style: dashed; color: var(--suave); font-size: 13px; width: 100%; }
+button.generar.armado { border-style: solid; border-color: var(--ojo); color: var(--ojo); }
+
+/* --- ambient: se lee desde el otro lado de la habitacion --- */
+#ambient { display: none; }
+body.ambiente header, body.ambiente main { display: none; }
+body.ambiente #ambient {
+  display: grid; grid-template-rows: auto 1fr auto; gap: 2vh;
+  position: fixed; inset: 0; z-index: 20; background: var(--fondo); padding: 4vh 4vw;
+}
+.a-cabecera { display: flex; align-items: baseline; justify-content: space-between; color: var(--suave); font-size: clamp(13px, 2.2vw, 34px); }
+#a-reloj { color: var(--texto); font-size: clamp(22px, 4vw, 64px); font-variant-numeric: tabular-nums; line-height: 1; }
+.a-centro { display: flex; flex-direction: column; justify-content: center; gap: 2.4vh; min-height: 0; overflow: hidden; }
+.a-bloque { display: flex; flex-direction: column; gap: .6vh; }
+.a-titulo { font-size: clamp(22px, 4.4vw, 74px); font-weight: 650; line-height: 1.1; }
+.a-bloque.urgente .a-titulo { color: var(--ojo); }
+.a-bloque.roto .a-titulo { color: var(--mal); }
+.a-bloque.calma .a-titulo { color: var(--ok); }
+.a-detalle { font-size: clamp(15px, 2.4vw, 38px); color: var(--suave); }
+.a-detalle .queda { color: var(--ojo); }
+.a-pie { display: flex; flex-direction: column; gap: 1vh; }
+.a-cifras { display: flex; gap: 6vw; font-size: clamp(15px, 2.6vw, 40px); font-variant-numeric: tabular-nums; }
+.a-cifras b { font-weight: 650; }
+.a-cifras .alta { color: var(--ojo); } .a-cifras .critica { color: var(--mal); }
+.a-briefing { color: var(--suave); font-size: clamp(12px, 1.9vw, 28px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 @media (max-width: 900px) {
   body { overflow: auto; height: auto; min-height: 100vh; }
   main { grid-template-columns: 1fr; height: auto; }
@@ -129,14 +174,37 @@ form button { flex: 0 0 auto; }
   </section>
 
   <section>
-    <h2>Chat</h2>
-    <div class="cuerpo" id="hilo"></div>
-    <form id="formulario">
-      <textarea id="entrada" placeholder="Escribe y pulsa Enter…" rows="1"></textarea>
-      <button type="submit" id="enviar">Enviar</button>
-    </form>
+    <h2 class="pestanas">
+      <button class="pestana activa" data-panel="chat">Chat</button>
+      <button class="pestana" data-panel="briefing">Briefing</button>
+    </h2>
+    <div class="panel" id="panel-chat">
+      <div class="cuerpo" id="hilo"></div>
+      <form id="formulario">
+        <textarea id="entrada" placeholder="Escribe y pulsa Enter…" rows="1"></textarea>
+        <button type="submit" id="enviar">Enviar</button>
+      </form>
+    </div>
+    <div class="panel oculto" id="panel-briefing">
+      <div class="cuerpo" id="briefing"><p class="vacio">Cargando…</p></div>
+      <div class="pie">
+        <!-- El unico boton de la consola que llama al modelo. Dos toques y lo dice. -->
+        <button class="generar" id="generar">Generar uno nuevo · llama al modelo</button>
+      </div>
+    </div>
   </section>
 </main>
+
+<!-- Ambient: tras 3 min sin tocar nada. Solo saca a la superficie lo que te
+     reclama, y si no hay nada que reclame lo dice sin ambiguedad. -->
+<div id="ambient">
+  <div class="a-cabecera"><span id="a-dia"></span><span id="a-reloj"></span></div>
+  <div class="a-centro" id="a-centro"></div>
+  <div class="a-pie">
+    <div class="a-cifras" id="a-cifras"></div>
+    <div class="a-briefing" id="a-briefing"></div>
+  </div>
+</div>
 
 <script>
 const $ = (s) => document.querySelector(s);
@@ -156,8 +224,9 @@ let pendientes = [];
 const resueltas = new Map();
 
 function cuentaAtras(segundos) {
-  const m = Math.floor(segundos / 60), s = Math.max(0, Math.round(segundos % 60));
-  return `quedan ${m}:${String(s).padStart(2, "0")}`;
+  // Redondear los segundos por separado daba "quedan 1:60" a falta de 119,9 s.
+  const total = Math.max(0, Math.round(segundos));
+  return `quedan ${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
 }
 
 function pintarAprobaciones() {
@@ -280,6 +349,7 @@ async function cargarAprobaciones() {
     pulso(false);
   }
   pintarAprobaciones();
+  if (ambiente) pintarAmbient();
 }
 
 // ---------------------------------------------------------------- estado
@@ -301,6 +371,8 @@ function barra(caja, titulo, usado, total, unidad, pct) {
   caja.append(etiqueta, barra);
 }
 
+let datosEstado = null;
+
 async function cargarEstado() {
   const caja = $("#estado");
   let datos;
@@ -311,9 +383,13 @@ async function cargarEstado() {
     pulso(true);
   } catch (e) {
     pulso(false);
+    datosEstado = null;
     caja.replaceChildren(crear("p", "vacio", "No se puede leer el estado: " + e.message));
+    if (ambiente) pintarAmbient();
     return;
   }
+  datosEstado = datos;
+  if (ambiente) pintarAmbient();
   caja.replaceChildren();
   $("#n-cont").textContent = `${datos.docker.en_marcha}/${datos.docker.contenedores}`;
 
@@ -442,12 +518,294 @@ $("#entrada").onkeydown = (e) => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("#formulario").requestSubmit(); }
 };
 
+// ---------------------------------------------------------------- horas
+// La zona la dicen los endpoints (la misma ZONA_HORARIA que usan el agente y
+// google-mcp): asi la tablet no pinta otra hora si tiene mal su reloj.
+let zona = Intl.DateTimeFormat().resolvedOptions().timeZone;
+const hora = (d) => d.toLocaleTimeString("es-ES", { timeZone: zona, hour: "2-digit", minute: "2-digit" });
+// sv-SE da "2026-09-27 14:32": ordenable como texto y en la zona que le pidas.
+const enZona = (d) => d.toLocaleString("sv-SE", { timeZone: zona });
+
+function cuando(iso) {
+  const d = new Date(iso), dia = enZona(d).slice(0, 10);
+  const hoy = enZona(new Date()).slice(0, 10);
+  const ayer = enZona(new Date(Date.now() - 86400000)).slice(0, 10);
+  if (dia === hoy) return `hoy a las ${hora(d)}`;
+  if (dia === ayer) return `ayer a las ${hora(d)}`;
+  return d.toLocaleDateString("es-ES", { timeZone: zona, weekday: "long", day: "numeric", month: "long" }) + ` a las ${hora(d)}`;
+}
+
+function hace(iso) {
+  const min = Math.round((Date.now() - new Date(iso)) / 60000);
+  if (min < 2) return "recién";
+  if (min < 60) return `hace ${min} min`;
+  const h = Math.round(min / 60);
+  return h < 48 ? `hace ${h} h` : `hace ${Math.round(h / 24)} días`;
+}
+
+// ---------------------------------------------------------------- briefing
+let losBriefings = [];
+const ETIQUETA_GENERAR = "Generar uno nuevo · llama al modelo";
+
+async function cargarBriefings() {
+  try {
+    const r = await fetch("/api/briefings?limite=7");
+    const d = await r.json();
+    losBriefings = d.briefings || [];
+    zona = d.zona || zona;
+  } catch (e) {
+    losBriefings = [];
+  }
+  pintarBriefing();
+  if (ambiente) pintarAmbient();
+}
+
+function pintarBriefing() {
+  const caja = $("#briefing");
+  caja.replaceChildren();
+  if (!losBriefings.length) {
+    caja.append(crear("p", "vacio", "Todavía no hay ningún briefing guardado. El de las 7:30 aparecerá aquí."));
+    return;
+  }
+  const [ultimo, ...antes] = losBriefings;
+  // La hora de generacion, grande: un briefing de las 7:30 leído a las seis de
+  // la tarde no puede parecer de ahora.
+  caja.append(crear("div", "sello", "Briefing de " + cuando(ultimo.creado_en)),
+              crear("div", "desde", hace(ultimo.creado_en)),
+              crear("div", "resumen", ultimo.resumen));
+  if (!ultimo.publicado) caja.append(crear("div", "sin-push", "No se pudo publicar en ntfy: no salió el aviso al móvil."));
+  for (const b of antes) {
+    const d = crear("details");
+    d.append(crear("summary", null, cuando(b.creado_en)), crear("div", "resumen", b.resumen));
+    caja.append(d);
+  }
+}
+
+// Dos toques a proposito: es el unico boton de aqui que cuesta dinero, y esta
+// en una pantalla que se mira todos los dias.
+let armado = null;
+function desarmar() {
+  clearTimeout(armado);
+  armado = null;
+  $("#generar").classList.remove("armado");
+  $("#generar").textContent = ETIQUETA_GENERAR;
+}
+
+async function generarBriefing() {
+  const b = $("#generar");
+  if (!armado) {
+    b.classList.add("armado");
+    b.textContent = "Pulsa otra vez: esto llama al modelo";
+    armado = setTimeout(desarmar, 5000);
+    return;
+  }
+  desarmar();
+  b.disabled = true;
+  b.textContent = "Generando… puede tardar un par de minutos";
+  try {
+    const r = await fetch("/api/briefing", { method: "POST" });
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || r.status);
+    await cargarBriefings();
+  } catch (e) {
+    b.textContent = "No ha salido: " + e.message;
+    setTimeout(() => { b.textContent = ETIQUETA_GENERAR; }, 8000);
+    b.disabled = false;
+    return;
+  }
+  b.disabled = false;
+  b.textContent = ETIQUETA_GENERAR;
+}
+
+$("#generar").onclick = generarBriefing;
+for (const p of document.querySelectorAll(".pestana")) {
+  p.onclick = () => {
+    for (const otra of document.querySelectorAll(".pestana")) otra.classList.toggle("activa", otra === p);
+    for (const panel of document.querySelectorAll(".panel")) panel.classList.toggle("oculto", panel.id !== "panel-" + p.dataset.panel);
+  };
+}
+
+// ---------------------------------------------------------------- agenda
+let datosAgenda = null;
+
+async function cargarAgenda() {
+  try {
+    const r = await fetch("/api/agenda");
+    const d = await r.json();
+    datosAgenda = r.ok ? d : null;
+    if (d.zona) zona = d.zona;
+  } catch (e) {
+    datosAgenda = null;
+  }
+  if (ambiente) pintarAmbient();
+}
+
+function proximoEvento() {
+  const eventos = datosAgenda?.eventos || [];   // ya vienen ordenados por hora
+  const ahora = enZona(new Date()).slice(0, 16);
+  // Las dos cadenas son hora de pared de la misma zona, asi que comparan y
+  // restan bien tratandolas como si fueran UTC. Cuenta el que esta pasando
+  // ahora, no solo el siguiente: es mas util que el de dentro de cuatro horas.
+  const vivo = eventos.find((e) => !e.todo_el_dia && (e.fin || e.inicio) > ahora);
+  if (vivo) {
+    const min = (Date.parse(vivo.inicio.replace(" ", "T") + "Z") - Date.parse(ahora.replace(" ", "T") + "Z")) / 60000;
+    return { texto: `${vivo.inicio.slice(11)} · ${vivo.titulo}`, min, fin: vivo.fin };
+  }
+  const todoElDia = eventos.find((e) => e.todo_el_dia);
+  return todoElDia ? { texto: `Todo el día · ${todoElDia.titulo}`, min: null } : null;
+}
+
+// ---------------------------------------------------------------- ambient
+const INACTIVIDAD = 180000;   // 3 min
+let ambiente = false, inactivo = null, candado = null;
+
+async function pantalla(encendida) {
+  // Sin wakeLock (o denegado) el resto funciona igual: solo se apaga la tablet.
+  try {
+    if (encendida && !candado) candado = await navigator.wakeLock.request("screen");
+    else if (!encendida && candado) { await candado.release(); candado = null; }
+  } catch (e) {
+    candado = null;
+  }
+}
+
+function entrarAmbient() {
+  if (ambiente) return;
+  ambiente = true;
+  document.body.classList.add("ambiente");
+  programar(REFRESCOS.ambient);
+  for (const f of REFRESCOS.ambient) f[0]();   // no esperar 30 s a la primera pintada
+  pintarAmbient();
+  pantalla(true);
+}
+
+function salirAmbient() {
+  ambiente = false;
+  document.body.classList.remove("ambiente");
+  programar(REFRESCOS.normal);
+  pantalla(false);
+}
+
+function despertar() {
+  clearTimeout(inactivo);
+  inactivo = setTimeout(entrarAmbient, INACTIVIDAD);
+  if (ambiente) salirAmbient();
+}
+
+function bloque(clase, titulo, detalles) {
+  const b = crear("div", "a-bloque " + clase);
+  b.append(crear("div", "a-titulo", titulo));
+  for (const d of detalles) b.append(d instanceof Node ? d : crear("div", "a-detalle", d));
+  return b;
+}
+
+const titular = (t) => (t.split("\n").map((l) => l.replace(/^[•\-\s]+/, "").trim()).find(Boolean) || "").slice(0, 120);
+
+function pintarAmbient() {
+  const centro = $("#a-centro");
+  centro.replaceChildren();
+  const ahora = new Date();
+  $("#a-reloj").textContent = hora(ahora);
+  $("#a-dia").textContent = ahora.toLocaleDateString("es-ES", { timeZone: zona, weekday: "long", day: "numeric", month: "long" });
+
+  // 1. Lo que espera un OK. Es lo mas importante que puede salir aqui.
+  if (pendientes.length) {
+    const detalles = pendientes.slice(0, 3).map((p) => {
+      const linea = crear("div", "a-detalle");
+      const queda = crear("span", "queda");
+      queda.dataset.caduca = p.caduca_en;   // lo actualiza el mismo tick de 1 s que las fichas
+      linea.append(crear("span", null, p.herramienta + " · "), queda);
+      return linea;
+    });
+    centro.append(bloque("urgente", pendientes.length === 1
+      ? "1 aprobación esperando" : `${pendientes.length} aprobaciones esperando`, detalles));
+  }
+
+  // 2. El server, si algo no esta sano. Por nombre.
+  const malos = (datosEstado?.contenedores || []).filter((c) => ["mal", "ojo"].includes(claseSalud(c)));
+  if (!datosEstado) {
+    centro.append(bloque("roto", "No se puede leer el server", ["El MCP del homelab no contesta"]));
+  } else if (malos.length) {
+    centro.append(bloque("roto", malos.length === 1
+      ? `${malos[0].nombre} no está bien` : `${malos.length} contenedores no están bien`,
+      [malos.slice(0, 4).map((c) => `${c.nombre} (${c.salud || c.estado})`).join(" · ")]));
+  }
+
+  // Si no reclama nada nadie, que se note. Una tablet que siempre parece tener
+  // algo que contarte se deja de mirar a la semana.
+  if (!centro.children.length) centro.append(bloque("calma", "Todo en orden", []));
+
+  // 3. Lo siguiente de la agenda, con su hora.
+  // Nada de rellenar: si hoy no hay nada, no sale ningun bloque de agenda.
+  const siguiente = proximoEvento();
+  if (siguiente) {
+    const detalle = siguiente.min === null ? "Hoy"
+      : siguiente.min <= 0 ? `Ahora mismo, hasta las ${siguiente.fin.slice(11)}`
+      : siguiente.min < 60 ? `Siguiente en la agenda · en ${Math.round(siguiente.min)} min`
+      : `Siguiente en la agenda · en ${Math.round(siguiente.min / 60)} h`;
+    centro.append(bloque("", siguiente.texto, [detalle]));
+  }
+
+  // 4. Tres numeros del server.
+  const cifras = $("#a-cifras");
+  cifras.replaceChildren();
+  if (datosEstado) {
+    const m = datosEstado.host.memoria;
+    const discos = datosEstado.host.discos || [];
+    const disco = discos.find((x) => x.punto_montaje === "/") || discos[0];
+    // Sanos sobre los que estan EN MARCHA, no sobre el total: en el server hay
+    // contenedores parados desde hace meses y un "22/41" permanente al lado de
+    // "Todo en orden" es justo el ruido que hace que no se mire la tablet.
+    const enMarcha = (datosEstado.contenedores || []).filter((c) => c.estado === "running");
+    const sanos = enMarcha.filter((c) => !["mal", "ojo"].includes(claseSalud(c))).length;
+    for (const [etiqueta, valor, pct] of [
+      ["RAM", `${m.usado_pct}%`, m.usado_pct],
+      [`Disco ${disco ? disco.punto_montaje : ""}`.trim(), disco ? `${disco.usado_pct}%` : "—", disco?.usado_pct || 0],
+      ["Sanos", `${sanos}/${enMarcha.length}`, sanos < enMarcha.length ? 95 : 0],
+    ]) {
+      const c = crear("div");
+      c.append(crear("span", null, etiqueta + " "), crear("b", pct > 90 ? "critica" : pct > 75 ? "alta" : "", valor));
+      cifras.append(c);
+    }
+  }
+
+  // 5. El titular del briefing de hoy.
+  const ultimo = losBriefings[0];
+  const esDeHoy = ultimo && enZona(new Date(ultimo.creado_en)).slice(0, 10) === enZona(new Date()).slice(0, 10);
+  $("#a-briefing").textContent = esDeHoy
+    ? `Briefing de las ${hora(new Date(ultimo.creado_en))} · ${titular(ultimo.resumen)}`
+    : "Hoy no hay briefing todavía";
+  refrescarCuentas();
+}
+
 // ---------------------------------------------------------------- arranque
-const reloj = () => $("#reloj").textContent = new Date().toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" });
+// Todo lo que la consola refresca sola. NINGUNA de estas llama al modelo: la
+// tablet esta encendida todo el dia y nadie ha pedido nada. Lo comprueba
+// app.pruebas en cada despliegue.
+const REFRESCOS = {
+  normal: [[cargarAprobaciones, 10000], [cargarEstado, 15000]],
+  ambient: [[cargarAprobaciones, 30000], [cargarEstado, 30000], [cargarAgenda, 30000], [cargarBriefings, 30000]],
+};
+let temporizadores = [];
+function programar(pares) {
+  for (const t of temporizadores) clearInterval(t);
+  temporizadores = pares.map(([f, ms]) => setInterval(f, ms));
+}
+
+const reloj = () => {
+  $("#reloj").textContent = hora(new Date());
+  if (ambiente) $("#a-reloj").textContent = hora(new Date());
+};
 reloj(); setInterval(reloj, 10000);
 setInterval(refrescarCuentas, 1000);
-cargarAprobaciones(); setInterval(cargarAprobaciones, 10000);
-cargarEstado(); setInterval(cargarEstado, 15000);
+programar(REFRESCOS.normal);
+cargarAprobaciones();
+cargarEstado();
+cargarBriefings();
+for (const ev of ["pointerdown", "keydown", "wheel", "touchstart"]) addEventListener(ev, despertar, { passive: true });
+// El sistema suelta el wakeLock al ocultar la pagina; si seguimos en ambient, se vuelve a pedir.
+document.addEventListener("visibilitychange", () => { if (ambiente && document.visibilityState === "visible") pantalla(true); });
+despertar();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js");
 </script>
 </body>
