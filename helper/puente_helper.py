@@ -18,10 +18,18 @@ import socketserver
 import subprocess
 import time
 
-# Estos no se actualizan desde aqui aunque alguien los meta en stacks.conf:
-# apiarena es el TFG en produccion, y puente se mataria a si mismo a mitad de la
-# operacion dejando la aprobacion colgada. La lista vive en el codigo a proposito.
-EXCLUIDOS = {"apiarena", "puente"}
+# Estos no se actualizan desde aqui nunca, aunque alguien los meta en
+# stacks.conf. La lista vive en el codigo a proposito, y se comprueba tres veces:
+# la clave, el directorio al que apunta y los servicios que define su compose.
+#
+#   apiarena   el TFG, en produccion.
+#   puente     se mataria a si mismo a mitad de la operacion y dejaria la
+#              aprobacion colgada.
+#   nextcloud  aloja fotos familiares irreemplazables, y un pull a ciegas puede
+#              saltarse varias versiones mayores: Nextcloud solo migra el
+#              esquema de una version mayor a la siguiente, asi que saltar dos
+#              deja la base a medias. Se actualiza a mano, de una en una.
+EXCLUIDOS = {"apiarena", "puente", "nextcloud"}
 
 CONFIG = os.environ.get("PUENTE_STACKS", "/etc/puente/stacks.conf")
 SOCKET = os.environ.get("PUENTE_SOCKET", "/run/puente/helper.sock")
@@ -51,6 +59,14 @@ def compose(ruta: str, *args: str, tope: int) -> subprocess.CompletedProcess:
         ["docker", "compose", "--project-directory", ruta, *args],
         capture_output=True, text=True, timeout=tope,
     )
+
+
+def servicios(ruta: str) -> set[str]:
+    """Los servicios que define ese compose. Solo lee el YAML, no arranca nada."""
+    r = compose(ruta, "config", "--services", tope=30)
+    if r.returncode != 0:
+        raise RuntimeError(f"no se puede leer el compose de {ruta}: {r.stderr[-200:].strip()}")
+    return set(r.stdout.split())
 
 
 def _filas(ruta: str) -> list[dict]:
@@ -101,16 +117,29 @@ def actualizar(stack: str) -> dict:
     if os.path.basename(os.path.realpath(ruta)) in EXCLUIDOS:
         log.warning("rechazado: '%s' apunta a un directorio excluido", stack)
         return {"ok": False, "error": f"'{stack}' apunta a un stack excluido"}
+    # Y el contenido: una clave inocente puede apuntar a un compose que levante
+    # nextcloud. Si el compose no se puede leer tampoco se sigue: sin saber que
+    # hay dentro no se actualiza (el pull fallaria igual, pero mas tarde).
+    try:
+        prohibidos = sorted(servicios(ruta) & EXCLUIDOS)
+    except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
+        log.warning("rechazado: '%s': %s", stack, exc)
+        return {"ok": False, "error": str(exc)}
+    if prohibidos:
+        log.warning("rechazado: el compose de '%s' define %s", stack, ", ".join(prohibidos))
+        return {"ok": False,
+                "error": f"el compose de '{stack}' define {', '.join(prohibidos)}, que esta excluido"}
 
     empezo = time.monotonic()
     anteriores = digests(ruta)
     log.info("actualizando '%s' (%s)", stack, ruta)
-    for orden, tope in (("pull", TOPE_PULL), ("up", TOPE_UP)):
-        args = ("pull",) if orden == "pull" else ("up", "-d", "--remove-orphans")
+    # Solo pull y up. Nada de --remove-orphans: borra contenedores del proyecto
+    # que ya no esten en el compose, y este proceso no borra nada de nada.
+    for args, tope in ((("pull",), TOPE_PULL), (("up", "-d"), TOPE_UP)):
         r = compose(ruta, *args, tope=tope)
         if r.returncode != 0:
-            log.error("'%s' fallo en %s: %s", stack, orden, r.stderr[-300:])
-            return {"ok": False, "error": f"compose {orden} fallo: {r.stderr[-300:].strip()}",
+            log.error("'%s' fallo en %s: %s", stack, args[0], r.stderr[-300:])
+            return {"ok": False, "error": f"compose {args[0]} fallo: {r.stderr[-300:].strip()}",
                     "digests_anteriores": anteriores, "estado": salud(ruta)}
 
     estado = salud(ruta)

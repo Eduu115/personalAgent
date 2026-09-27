@@ -48,7 +48,9 @@ Voy a instalar el helper del puente. Esto es lo que va a pasar, y nada mas:
   4. Instalar la unidad $UNIDAD y arrancarla.
 
 El helper corre como root porque habla con el socket de Docker. Nunca actualiza
-'apiarena' ni 'puente', aunque los pongas en $CONFIG: esa lista esta en su codigo.
+'apiarena', 'puente' ni 'nextcloud', aunque los pongas en $CONFIG: esa lista
+esta en su codigo. Solo ejecuta 'compose pull' y 'compose up -d': ni down, ni
+rm, ni prune, ni nada que toque volumenes.
 
 FIN
 read -rp "¿Sigo? [s/N] " ok
@@ -66,7 +68,7 @@ if [ ! -f "$CONFIG" ]; then
     cat > "$CONFIG" <<'CONF'
 # Stacks que el helper puede actualizar: nombre=/ruta/al/directorio
 # El nombre es lo unico que viaja desde el agente. Ejemplo:
-#nextcloud=/home/edu/apps/nextcloud
+#paperless=/home/edu/apps/paperless
 CONF
     chmod 0600 "$CONFIG"; chown root:root "$CONFIG"
     echo "configuracion creada en $CONFIG (vacia: anade tus stacks)"
