@@ -435,6 +435,11 @@ guarda las fotos de casa y solo migra el esquema de una version mayor a la
 siguiente: un `pull` a ciegas que salte dos deja la base a medias. Ese se
 actualiza a mano.
 
+Los contenedores montan el directorio `/run/puente`, no el socket: asi un
+reinicio del helper no los deja mirando un inodo que ya no existe (y por eso la
+unidad lleva `RuntimeDirectoryPreserve=yes`). Si cambias `HELPER_SOCKET` en el
+`.env`, cambia `HELPER_DIR` igual; el despliegue comprueba que cuadran.
+
 Cada vez que cambie `helper/puente_helper.py` o la unidad, hay que **volver a
 ejecutar el instalador**: lo que corre es la copia de `/usr/local/lib/puente/`, y
 un `git pull` no la actualiza. El instalador reemplaza las dos cosas y reinicia

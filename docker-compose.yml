@@ -153,10 +153,11 @@ services:
       # /etc/puente/equipos.conf del host; las MAC no entran aqui.
       EQUIPOS_DESPERTABLES: ${EQUIPOS_DESPERTABLES:-}
     volumes:
-      # El socket del helper del host. El agente lo necesita para el boton de
-      # encender el PC, que NO es una herramienta MCP a proposito: el modelo no
-      # puede pedirlo. En desarrollo no existe y se monta /dev/null.
-      - ${HELPER_SOCKET:-/dev/null}:/run/puente/helper.sock
+      # El DIRECTORIO del helper, por lo mismo que en homelab-mcp: el socket se
+      # resuelve al conectar y no al arrancar. El agente lo necesita para el
+      # boton de encender el PC, que NO es una herramienta MCP a proposito: el
+      # modelo no puede pedirlo.
+      - ${HELPER_DIR:-/run/puente}:/run/puente
     # El grupo del socket del helper, el mismo que homelab-mcp. Por defecto, uno
     # que no existe: sin el instalador, el agente no alcanza el helper.
     group_add:
@@ -234,10 +235,14 @@ services:
         source: /proc
         target: /host/proc
         read_only: true
-      # El socket del helper del host: la unica via para actualizar un stack
-      # (el socket-proxy no puede, ver homelab-mcp/app/helper.py). En desarrollo
-      # no existe, se monta /dev/null y da igual porque la herramienta no esta.
-      - ${HELPER_SOCKET:-/dev/null}:/run/puente/helper.sock
+      # El DIRECTORIO del helper del host, no el fichero del socket: montar el
+      # socket lo resuelve a un inodo al arrancar el contenedor, y el helper lo
+      # recrea cada vez que se reinicia. Montando el directorio, el socket se
+      # resuelve al conectar y un reinicio del helper deja de importar.
+      # Es la unica via para actualizar un stack (el socket-proxy no puede, ver
+      # homelab-mcp/app/helper.py). En desarrollo el directorio no existe y se
+      # ve vacio: la herramienta tampoco esta, asi que da igual.
+      - ${HELPER_DIR:-/run/puente}:/run/puente
       - type: bind
         source: /
         target: /hostfs

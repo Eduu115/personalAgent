@@ -105,6 +105,13 @@ Environment=PUENTE_GRUPO_GID=$GID
 Restart=on-failure
 RestartSec=5
 RuntimeDirectory=puente
+# Que el directorio sobreviva a los reinicios del servicio. Sin esto, systemd lo
+# BORRA y lo recrea en cada arranque, con un inodo nuevo: los contenedores, que
+# lo montan por bind, se quedan agarrados al inodo viejo y a partir de ahi todo
+# lo que intenten da ConnectionRefused. En silencio y sin que nada cambie de
+# aspecto: el socket nuevo esta perfecto, pero ellos miran al que ya no existe.
+# Cada reinstalacion del helper rompia los dos contenedores.
+RuntimeDirectoryPreserve=yes
 # 0755 y no 0750 a proposito: para ABRIR el socket hay que poder atravesar el
 # directorio que lo contiene, y este directorio es de root:root. Con 0750, ni
 # homelab-mcp ni el agente llegan al socket aunque esten en el grupo
