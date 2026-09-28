@@ -159,6 +159,19 @@ def _reviews(reviews: list[dict[str, Any]], pedidas: int) -> str:
 
 
 async def _una_pr(repo: str, pr: dict[str, Any]) -> dict[str, Any]:
+    """Lo que hace falta para decidir si esta PR reclama algo. El cuerpo NO.
+
+    La descripcion de la PR no se devuelve a proposito, y no por miedo: es
+    texto de fuera como el de un correo y pasaria por lo mismo que el resto. Es
+    que para decidir si una PR pide atencion basta con el CI, los dias parada y
+    las reviews, y la descripcion es la mayor superficie de inyeccion que tiene
+    una PR. Sin ganancia, esa superficie no entra en el briefing, que corre a
+    las 7:30 sin nadie delante.
+
+    Si algun dia hace falta leerla: herramienta aparte, y solo en el turno del
+    usuario (`origin == "user"`, como las escrituras de memoria). Aqui no, que
+    esto lo llama el briefing. Lo comprueba pruebas.inyeccion().
+    """
     numero = pr["number"]
     checks = await _pedir(f"/repos/{repo}/commits/{pr['head']['sha']}/check-runs")
     reviews = await _pedir(f"/repos/{repo}/pulls/{numero}/reviews")
