@@ -522,6 +522,42 @@ async def vigilancia_no_escribe() -> None:
     print(f"OK vigilancia: solo lee ({', '.join(sorted(usadas))}) y el atajo rechaza lo demas")
 
 
+async def latido_de_la_vigilancia() -> None:
+    """El briefing dice cuando fue la ultima comprobacion de proactividad.
+
+    Si el job de vigilancia deja de correr no llega ningun aviso, y eso es
+    indistinguible de que todo vaya bien. El briefing lo lee todos los dias, asi
+    que ahi es donde el silencio pasa de ambiguo a comprobable. Cuando lleva
+    parada, la linea sube arriba con los demas avisos en vez de quedarse
+    de ultima, que es donde no la leeria nadie.
+    """
+    from datetime import datetime, timedelta
+
+    from . import briefing, db
+    from .config import MADRID
+
+    original = db.ultima_vigilancia
+    try:
+        for titulo, hace, espera_muerta, trozo in (
+            ("acabada de correr", timedelta(seconds=20), False, "menos de un minuto"),
+            ("recien corrida", timedelta(minutes=4), False, "hace 4 min"),
+            ("justo en el limite", timedelta(minutes=15), False, "hace 15 min"),
+            ("parada un rato", timedelta(minutes=16), True, "no comprueba nada"),
+            ("parada toda la noche", timedelta(hours=9), True, "hace 9 h"),
+            ("nunca ha corrido", None, True, "ninguna vez"),
+        ):
+            cuando = None if hace is None else datetime.now(MADRID) - hace
+            db.ultima_vigilancia = lambda *_a, _c=cuando, **_k: asyncio.sleep(0, result=_c)
+            linea, muerta = await briefing.linea_de_vigilancia()
+            assert muerta is espera_muerta, f"{titulo}: muerta={muerta}, se esperaba {espera_muerta}"
+            assert trozo in linea, f"{titulo}: {linea!r} no dice {trozo!r}"
+            if espera_muerta:
+                assert "no significa que todo vaya bien" in linea or "todavía" in linea, linea
+        print("OK latido: 6 casos, y a partir de 15 min el briefing lo sube arriba con los avisos")
+    finally:
+        db.ultima_vigilancia = original
+
+
 def rutas() -> None:
     """Las rutas que abren los botones del push siguen existiendo."""
     caminos = {r.path for r in main.app.routes}
@@ -559,5 +595,6 @@ if __name__ == "__main__":
     asyncio.run(candados_memoria())
     asyncio.run(candado_de_acciones())
     asyncio.run(vigilancia_no_escribe())
+    asyncio.run(latido_de_la_vigilancia())
     asyncio.run(arranque())
     print("todo OK")

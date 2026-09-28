@@ -504,6 +504,18 @@ de verdad: `pruebas.transiciones_de_vigilancia()` pasa secuencias inventadas y
 comprueba que avisa a la tercera, que **calla 200 comprobaciones seguidas** con
 algo roto, que un pico no cuenta y que la banda entre umbrales no mueve nada.
 
+**El briefing cierra el circulo.** Si el job de vigilancia deja de ejecutarse no
+llega ningun aviso, y eso es indistinguible de que todo vaya bien. El briefing
+lo lee alguien todos los dias, asi que termina con una linea que dice cuando fue
+la ultima comprobacion ("Vigilancia: última comprobación hace 4 min"). El dia
+que ponga "hace 9 horas", el silencio de la noche deja de significar nada y se
+sabe. Si lleva mas de tres intervalos parada, esa linea sube arriba con los
+demas avisos, que es donde se lee. No la escribe el modelo: la pone el codigo
+sobre la respuesta ya guardada, porque una linea que se puede quedar fuera segun
+el dia no sirve para comprobar nada. Ni monitor externo ni heartbeat aparte: la
+marca sale de `visto_en`, que ya se toca en cada pasada, y por eso significa
+"cuando midio algo" y no "cuando arranco el job", que es mejor dato.
+
 Un detalle que costo encontrar: **el nombre de una vigilancia no puede llevar su
 umbral dentro**. `presupuesto:80` se renombra a `presupuesto:3` si cambias el
 aviso, la fila vieja se queda en "mal" para siempre y la recuperacion no llega
