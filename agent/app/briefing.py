@@ -34,6 +34,7 @@ PROMPT_PLANTILLA = """Prepárame el briefing de hoy. Lo leo en el móvil recién
 • Agenda de hoy (cal_agenda). Hora y título de cada cosa; di si algo se solapa. Si no hay nada, una línea.
 • Correos que importan de las últimas 24 horas. Búscalos con mail_buscar usando exactamente esta consulta: {query}
   De lo que salga, cuéntame solo lo que me pide hacer algo o que querría saber hoy: quién y de qué va, una línea cada uno. Newsletters y publicidad no cuentan. Si no hay nada, dilo.
+• Pull requests que reclamen algo (dev_prs). SOLO las que lo necesitan: el CI en rojo, sin tocar en más de {pr_dias} días, o con reviews pendientes. Una línea cada una: repo, número, título corto y qué le pasa. Si alguna tiene el CI en rojo y quieres decir qué falló, dev_checks. Un listado de todas las PRs abiertas no sirve de nada: si ninguna reclama nada, no digas nada de esto.
 • El server (lab_status, y lab_host si hace falta): solo si hay algo raro, en una línea. Un contenedor caído, unhealthy o reiniciando, o la memoria o el disco al límite. Si todo va bien, no hace falta decirlo.
 
 Sobre las alarmas: no tienes memoria de lo que hago yo. Un aviso de seguridad de Google, un inicio de sesión nuevo o una contraseña de aplicación recién creada casi siempre los he provocado yo, y no lo sabes. No des la alarma salvo que haya evidencia clara de que algo va mal. Si algo te parece raro, descríbelo en una línea, sin sacar conclusiones y sin dramatizar. Un briefing que grita "que viene el lobo" cada mañana se deja de leer a los tres días.
@@ -45,17 +46,24 @@ Formato: texto plano para una notificación del móvil. Viñetas con "•", nada
 # Lo que mira el briefing y de donde sale. Si una parte no se ha podido
 # consultar, el briefing lo dice arriba: un briefing que omite la mitad en
 # silencio es peor que uno que avisa, porque "no hay correos" tranquiliza.
-_AREAS = ["el calendario", "el correo", "el server"]
+_AREAS = ["el calendario", "el correo", "las PRs", "el server"]
 _AREA_DE_HERRAMIENTA = {
     "cal_agenda": "el calendario",
     "mail_buscar": "el correo",
     "mail_leer": "el correo",
+    "dev_prs": "las PRs",
+    "dev_checks": "las PRs",
+    "dev_diff": "las PRs",
     "lab_status": "el server",
     "lab_host": "el server",
     "lab_stats": "el server",
     "lab_logs": "el server",
 }
-_AREAS_DE_SERVIDOR = {"google": ["el calendario", "el correo"], "homelab": ["el server"]}
+_AREAS_DE_SERVIDOR = {
+    "google": ["el calendario", "el correo"],
+    "homelab": ["el server"],
+    "github": ["las PRs"],
+}
 
 
 def aviso_no_consultado(no_consultado: dict[str, str]) -> str | None:
@@ -123,7 +131,9 @@ async def lanzar(programado: datetime | None = None) -> dict[str, Any]:
         for servidor in caidos:
             for area in _AREAS_DE_SERVIDOR.get(servidor, [f"lo de {servidor}"]):
                 no_consultado[area] = f"{servidor}-mcp no responde"
-        prompt = PROMPT_PLANTILLA.format(query=settings.query_briefing)
+        prompt = PROMPT_PLANTILLA.format(
+            query=settings.query_briefing, pr_dias=settings.briefing_pr_dias
+        )
         if anteriores := await db.ultimos_briefings(3):
             # Para que no le cuente tres dias seguidos la misma alerta de Google.
             contados = "\n\n".join(

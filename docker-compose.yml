@@ -217,6 +217,10 @@ services:
   homelab-mcp:
     build:
       context: ./homelab-mcp
+      # redact.py vive una sola vez, en comun/: son las reglas que tapan los
+      # secretos y dos copias son dos versiones de la misma barrera.
+      additional_contexts:
+        comun: ./comun
     image: puente/homelab-mcp:dev
     container_name: puente-homelab-mcp
     restart: unless-stopped
@@ -291,6 +295,10 @@ services:
   google-mcp:
     build:
       context: ./google-mcp
+      # redact.py vive una sola vez, en comun/: son las reglas que tapan los
+      # secretos y dos copias son dos versiones de la misma barrera.
+      additional_contexts:
+        comun: ./comun
     image: puente/google-mcp:dev
     container_name: puente-google-mcp
     restart: unless-stopped
@@ -319,6 +327,52 @@ services:
     # ~48 MiB en reposo. El margen es para parsear un correo de 1 MB o un .ics grande.
     mem_limit: 192m
     memswap_limit: 192m
+    networks: [puente]
+    logging: *default-logging
+
+  # ---------------------------------------------------------------- github
+
+  # Las PRs de Edu, solo lectura. Un PAT de grano fino con permisos de lectura y
+  # nada mas; aqui no hay ninguna herramienta que escriba y no la va a haber:
+  # ni aprobar, ni mergear, ni comentar. deploy.sh lo comprueba contra lo que
+  # anuncia el servidor, no contra lo que ponga en el codigo.
+  # En la red puente porque tiene que salir a api.github.com.
+  github-mcp:
+    build:
+      context: ./github-mcp
+      additional_contexts:
+        comun: ./comun
+    image: puente/github-mcp:dev
+    container_name: puente-github-mcp
+    # Si falta la configuracion no arranca y lo dice en el log; con esto lo
+    # reintenta en bucle, que es ruidoso pero visible. En el server no pasa:
+    # deploy.sh no deja desplegar sin GITHUB_REPOS y GITHUB_TOKEN. En el
+    # portatil, el override de desarrollo le pone restart: "no".
+    restart: unless-stopped
+    environment:
+      # Los repos que se miran. Vacio: el servidor no arranca y lo dice, en vez
+      # de quedarse anunciando herramientas que fallan en cada llamada.
+      GITHUB_REPOS: ${GITHUB_REPOS:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN:-}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    security_opt:
+      - no-new-privileges:true
+    # En localhost, como los otros dos, para que Claude Code use el mismo servidor.
+    ports:
+      - "127.0.0.1:${GITHUB_MCP_PORT:-8424}:8000"
+    healthcheck:
+      # Solo que el servidor responde: que GitHub este caido no es cosa suya.
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=4).status == 200 else 1)"]
+      interval: 30s
+      timeout: 8s
+      retries: 5
+      start_period: 15s
+    # ~45 MiB en reposo. El margen es para un diff grande antes de capado.
+    mem_limit: 160m
+    memswap_limit: 160m
     networks: [puente]
     logging: *default-logging
 

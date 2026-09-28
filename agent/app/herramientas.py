@@ -43,6 +43,11 @@ RIESGO: dict[str, str] = {
     "mail_buscar": "read",
     "mail_leer": "read",
     "cal_agenda": "read",
+    # github-mcp: solo lectura, y no hay nada mas que ofrecer. Aprobar, mergear
+    # o comentar no existen como herramientas, ni apagadas.
+    "dev_prs": "read",
+    "dev_checks": "read",
+    "dev_diff": "read",
     # Escrituras: no se ejecutan, se encolan y esperan un OK (aprobaciones.py).
     "mail_borrador": "write",
     "lab_reiniciar": "sensitive",

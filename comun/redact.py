@@ -7,12 +7,11 @@ un token en una URL. Todo eso pasaria intacto al prompt y de ahi al proveedor.
 Esto no es infalible y no pretende serlo: es la ultima red antes de que un
 secreto salga de la maquina. La primera sigue siendo no loguearlos.
 
-GEMELO: este fichero existe DOS veces y byte a byte igual, en homelab-mcp/app/
-y en google-mcp/app/. Si cambias uno, copia el otro tal cual; deploy.sh los
-compara con cmp y se para si difieren, porque son las reglas que tapan los
-secretos y una copia con un fallo que la otra no tiene es como se escapa uno.
-Esta duplicado a proposito (deuda apuntada en CLAUDE.md): 40 lineas son mas
-baratas que compartir contexto de build entre dos servidores.
+UNA SOLA COPIA: este fichero vive en comun/ y los Dockerfiles de los servidores
+MCP lo meten con `COPY --from=comun` (additional_contexts del compose). Estuvo
+duplicado en homelab-mcp y google-mcp mientras eran dos; al llegar el tercero
+tocaba paquete comun, que es lo que decia CLAUDE.md. Son las reglas que tapan
+los secretos, y dos versiones de una barrera de seguridad son una barrera menos.
 """
 
 from __future__ import annotations
