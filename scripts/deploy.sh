@@ -283,7 +283,26 @@ preguntar_helper() {
 if [ -z "$STACKS_ACTUALIZABLES" ] && [ -z "$EQUIPOS_DESPERTABLES" ]; then
     echo "helper del host: sin configurar, no se comprueba"
 else
-    [ -S "$HELPER_SOCKET" ] || fallo "no existe el socket del helper en $HELPER_SOCKET: ./scripts/instalar_helper.sh"
+    # Que no llegue al socket puede ser tres cosas muy distintas, y hasta ahora
+    # las tres se reportaban como "no existe", que manda a buscar donde no es.
+    # La de en medio paso de verdad: RuntimeDirectoryMode=0750 dejaba
+    # /run/puente en root:root sin permiso de paso, y ni los contenedores (con
+    # su group_add) ni este script llegaban al socket, que estaba perfecto.
+    directorio="$(dirname "$HELPER_SOCKET")"
+    if [ ! -d "$directorio" ]; then
+        fallo "no existe $directorio: el helper no esta instalado o no ha arrancado nunca (sudo ./scripts/instalar_helper.sh)"
+    fi
+    # El bit de paso de "otros", no un test -x: quien tiene que atravesarlo son
+    # los contenedores, no el usuario que ejecuta esto (y para root todo pasa).
+    modo_dir="$(stat -Lc '%a' "$directorio")"
+    case "$modo_dir" in
+        *1 | *3 | *5 | *7) : ;;
+        *) fallo "$directorio es $(stat -Lc '%U:%G %a' "$directorio") y nadie de fuera puede atravesarlo: el socket puede estar perfecto y aun asi no se alcanza. Tiene que ser 0755 (RuntimeDirectoryMode en la unidad): sudo ./scripts/instalar_helper.sh" ;;
+    esac
+    if [ ! -e "$HELPER_SOCKET" ]; then
+        fallo "$directorio se ve bien pero no hay socket en $HELPER_SOCKET: el servicio no esta corriendo (systemctl status puente-helper)"
+    fi
+    [ -S "$HELPER_SOCKET" ] || fallo "$HELPER_SOCKET existe y no es un socket: borra eso y systemctl restart puente-helper"
     permisos="$(stat -Lc '%U %G %a' "$HELPER_SOCKET")"
     case "$permisos" in
         "root "*" 660") echo "helper: socket $HELPER_SOCKET ($permisos)" ;;
@@ -292,7 +311,7 @@ else
     saludo="$(preguntar_helper "$HELPER_SOCKET" '{"op":"ping"}')"
     case "$saludo" in
         *'"ok": true'*) echo "helper: responde al ping" ;;
-        *) fallo "el helper no contesta: journalctl -u puente-helper -n 30" ;;
+        *) fallo "el helper no contesta (el motivo esta justo encima): journalctl -u puente-helper -n 30" ;;
     esac
     case "$(preguntar_helper "$HELPER_SOCKET" '{"op":"actualizar","stack":"no-existe-este-stack"}')" in
         *'"ok": false'*) echo "helper: un stack fuera de su mapa, rechazado" ;;
@@ -341,6 +360,25 @@ else
     kill "$prueba_pid" 2>/dev/null || true
     rm -rf "$conf_prueba" "$sock_prueba" "$dir_prueba"
     [ -z "$malas" ] || fallo "EL HELPER ACTUALIZARIA:$malas"
+
+    # Que el socket se vea desde fuera no dice que se vea desde DENTRO, que es
+    # lo que importa: los dos contenedores llegan por group_add y por el bind
+    # mount. Sin esto, el fallo aparece el dia que pulsas el boton.
+    for servicio in homelab-mcp agent; do
+        docker compose exec -T "$servicio" python - <<'SOCK' || fallo "$servicio no alcanza el helper en /run/puente/helper.sock (el motivo, arriba): mira el modo de /run/puente y el HELPER_GID del .env"
+import socket, sys
+
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.settimeout(10)
+try:
+    s.connect("/run/puente/helper.sock")
+except Exception as exc:
+    sys.exit(f"  {type(exc).__name__}: {exc}")
+s.sendall(b'{"op":"ping"}\n')
+print("  " + s.makefile().readline().strip()[:90])
+SOCK
+        echo "helper: $servicio lo alcanza"
+    done
 fi
 
 # Encender el PC no es una herramienta y no puede llegar a serlo por descuido:

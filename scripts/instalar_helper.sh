@@ -47,7 +47,11 @@ Voy a instalar el helper del puente. Esto es lo que va a pasar, y nada mas:
      comentado. Ahi decides tu que stacks se pueden actualizar y que equipos se
      pueden encender. El helper NUNCA acepta una ruta ni una MAC por parametro:
      solo claves de esos ficheros.
-  4. Instalar la unidad $UNIDAD y arrancarla.
+  4. Instalar la unidad $UNIDAD y (re)arrancar el servicio.
+
+Si ya estaba instalado, esto REEMPLAZA el helper y la unidad y reinicia el
+servicio. Es la unica forma de aplicar un cambio del codigo: lo que corre es la
+copia de $DESTINO, y un git pull no la toca.
 
 El helper corre como root porque habla con el socket de Docker. Nunca actualiza
 'apiarena', 'puente' ni 'nextcloud', aunque los pongas en $CONFIG: esa lista
@@ -101,16 +105,27 @@ Environment=PUENTE_GRUPO_GID=$GID
 Restart=on-failure
 RestartSec=5
 RuntimeDirectory=puente
-RuntimeDirectoryMode=0750
+# 0755 y no 0750 a proposito: para ABRIR el socket hay que poder atravesar el
+# directorio que lo contiene, y este directorio es de root:root. Con 0750, ni
+# homelab-mcp ni el agente llegan al socket aunque esten en el grupo
+# puente-helper, y deploy.sh (que corre como usuario normal) lo reporta como
+# "no existe el socket", que manda a buscar donde no es.
+# El control de acceso no se afloja con esto: sigue estando en el socket, que
+# es root:puente-helper con 0660. Poder entrar en el portal no da llave.
+RuntimeDirectoryMode=0755
 # Corre como root porque el socket de Docker lo es todo, pero sin nada mas:
-# no puede escalar privilegios, el sistema de ficheros es de solo lectura salvo
-# lo suyo, y solo habla por sockets unix (quien baja las imagenes es el demonio).
+# no puede escalar privilegios y el sistema de ficheros es de solo lectura salvo
+# lo suyo. Quien baja las imagenes es el demonio de Docker, no esto.
 NoNewPrivileges=true
 ProtectSystem=full
 PrivateTmp=true
 ProtectKernelTunables=true
 ProtectControlGroups=true
-RestrictAddressFamilies=AF_UNIX
+# AF_UNIX para hablar con quien le pide cosas, y AF_INET para el paquete de
+# Wake-on-LAN, que es un UDP a la broadcast. Sin AF_INET, socket() falla con
+# EAFNOSUPPORT dentro del hijo y el boton de encender no funciona nunca: pasa
+# solo bajo systemd, asi que no se ve probando el helper a mano.
+RestrictAddressFamilies=AF_UNIX AF_INET
 RestrictSUIDSGID=true
 ReadWritePaths=/run/puente
 
@@ -119,7 +134,12 @@ WantedBy=multi-user.target
 UNIT
 
 systemctl daemon-reload
-systemctl enable --now puente-helper.service
+systemctl enable puente-helper.service
+# restart y no "enable --now": si el servicio ya estaba corriendo, --now no hace
+# nada y te quedas con el helper viejo en memoria y el nuevo en disco. Es el
+# mismo despiste que el de haproxy.cfg, y aqui ademas /usr/local/lib/puente solo
+# cambia cuando se ejecuta esto: un git pull no actualiza nada de lo instalado.
+systemctl restart puente-helper.service
 sleep 1
 systemctl is-active --quiet puente-helper.service || fallo "el servicio no ha arrancado: journalctl -u puente-helper -n 30"
 

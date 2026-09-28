@@ -435,6 +435,11 @@ guarda las fotos de casa y solo migra el esquema de una version mayor a la
 siguiente: un `pull` a ciegas que salte dos deja la base a medias. Ese se
 actualiza a mano.
 
+Cada vez que cambie `helper/puente_helper.py` o la unidad, hay que **volver a
+ejecutar el instalador**: lo que corre es la copia de `/usr/local/lib/puente/`, y
+un `git pull` no la actualiza. El instalador reemplaza las dos cosas y reinicia
+el servicio.
+
 ### Mirarlo, pararlo y desinstalarlo
 
 ```bash
