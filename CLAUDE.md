@@ -398,6 +398,31 @@ confiable. En el diff se redacta ANTES de truncar: al reves, una clave partida
 por el corte deja su primera mitad dentro. Hay un test con una PR ficticia cuyo
 titulo y cuerpo intentan una inyeccion, igual que el que ya habia para el correo.
 
+**Dos reglas para todo lo que capa texto de fuera**, que salieron de `dev_diff`
+y valen igual para el correo y para cualquier cosa que venga:
+
+1. **Redactar entero y despues cortar, nunca al reves.** Cortar primero deja
+   dentro la primera mitad de un secreto que cruce el corte, y el trozo que
+   queda ya no casa con el patron. Medido en `mail_buscar`: un DSN partido
+   dejaba `postgresql://app:hunter2s` en claro, y un JWT partido dejaba su
+   cabecera y parte del payload, porque los dos patrones necesitan algo que
+   estaba al otro lado (la `@` del DSN, el tercer trozo del JWT). Una clave
+   `sk-` se salvaba de chiripa, porque su fragmento seguia pareciendo una clave.
+2. **Contar sobre lo que se VE, no sobre el documento.** Un
+   "20 secretos redactados" al lado de un trozo donde no se ve ninguno hace que
+   el modelo cuente cosas que no ha recibido. De lo cortado ya avisa el campo
+   de truncado.
+
+En `google-mcp/app/correo.py` viven como `capado()` y `vistos()`, y los usan el
+snippet de `mail_buscar`, el cuerpo de `mail_leer` y la muestra del texto
+oculto. `lab_logs` no trunca, asi que no le aplica.
+
+**El cuerpo de una PR no lo devuelve ninguna herramienta.** El titulo si (es lo
+que necesita el briefing), y por eso el test de inyeccion va sobre el titulo.
+La descripcion es la superficie de inyeccion mas grande de una PR y ahora mismo
+no entra en el prompt; el test mete una inyeccion tambien en el cuerpo y
+comprueba que no sale, para que siga siendo verdad.
+
 **"sin checks" no es "pasando".** De los cuatro repos configurados solo
 API-ARENA tiene workflows de Actions, asi que una lista vacia de checks va a ser
 lo normal, y devolverla pelada se lee como todo verde. `dev_checks` dice por
