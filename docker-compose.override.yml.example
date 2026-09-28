@@ -30,3 +30,10 @@ services:
         source: /
         target: /hostfs
         read_only: true
+
+  # Sin GITHUB_REPOS/GITHUB_TOKEN el servidor se niega a arrancar (a proposito:
+  # una capacidad apagada se tiene que ver), y con restart: unless-stopped eso
+  # es un contenedor reintentando para siempre. En el portatil, que lo intente
+  # una vez y se quede quieto con el motivo en el log.
+  github-mcp:
+    restart: "no"

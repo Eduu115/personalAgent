@@ -10,6 +10,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
+# Una sola copia de las reglas de redaccion, en comun/ (additional_contexts).
+COPY --from=comun redact.py ./app/redact.py
 
 # Sin root. Este servicio solo lee: no necesita privilegios y no los tendra.
 RUN useradd --system --uid 10002 --no-create-home mcp \

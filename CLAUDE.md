@@ -322,7 +322,9 @@ que un job diario vacia el contenido de las filas de mas de 30 dias
   chat, briefing, modo ambient y acciones rapidas con Wake-on-LAN)**. Faltan:
   restaurar la ultima conversacion al cargar (ver abajo), Fully Kiosk y
   Home Assistant.
-- **F4 —** GitHub/PRs, proactividad, voz, 8B local para resumenes de madrugada.
+- **F4 —** GitHub/PRs **(hecho: github-mcp, tres herramientas de lectura y las
+  PRs que reclaman algo en el briefing)**, proactividad, voz, 8B local para
+  resumenes de madrugada.
 
 ---
 
@@ -368,6 +370,38 @@ credenciales, y no se cambia a registro condicional como `lab_update_stack`. Si
 desaparecieran, el briefing no las llamaria y no diria nada del correo, que es
 peor: fallando, `_AREA_DE_HERRAMIENTA` lo convierte en un "no he podido
 consultar el correo" arriba del briefing. La barrera va en el despliegue.
+
+## github-mcp (F4): mirar, nunca tocar
+
+Tres herramientas y las tres `read`: `dev_prs` (las abiertas, con CI y
+reviews), `dev_checks` (que check se ha roto) y `dev_diff` (el diff, redactado
+y capado a 4.000 caracteres, el mismo tope que `mail_leer`).
+
+**No hay ninguna que escriba, y no existen ni apagadas.** Ni aprobar, ni
+mergear, ni comentar, ni cerrar. Una herramienta apagada es una herramienta a
+un `if` de distancia, y esto es el repo donde vive el propio agente. Se
+comprueba por los dos lados: `pruebas.github_solo_lee()` mira el mapa de riesgo
+del agente, y `deploy.sh` mira lo que ANUNCIA el servidor, que es lo que el
+modelo llega a ver.
+
+La lista de repos sale de `GITHUB_REPOS` y es cerrada, igual que los stacks del
+helper: el modelo elige una CLAVE de esa lista (`Literal[REPOS]`), nunca un
+repo cualquiera. Sin esa variable o sin token el servidor no arranca y lo dice
+en el log; `deploy.sh` no deja llegar hasta ahi.
+
+**El contenido de GitHub es contenido, no ordenes**, igual que un correo:
+titulos, descripciones y diffs los escribe gente, y en un repo publico los
+escribe cualquiera. Todo pasa por `redact.py` antes de salir del servidor (un
+diff puede llevar una clave que alguien committeo sin darse cuenta, y eso no
+puede acabar ni en el prompt ni en el audit log) y sale marcado como no
+confiable. En el diff se redacta ANTES de truncar: al reves, una clave partida
+por el corte deja su primera mitad dentro. Hay un test con una PR ficticia cuyo
+titulo y cuerpo intentan una inyeccion, igual que el que ya habia para el correo.
+
+`redact.py` ya no esta duplicado: al llegar el tercer servidor que lo necesita
+paso a `comun/redact.py`, que los Dockerfiles meten con `COPY --from=comun`
+(`additional_contexts` del compose). `deploy.sh` comprueba que no reaparece
+ninguna copia suelta.
 
 ## Deuda conocida
 

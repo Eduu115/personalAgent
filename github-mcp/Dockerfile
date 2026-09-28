@@ -13,8 +13,8 @@ COPY app ./app
 # Una sola copia de las reglas de redaccion, en comun/ (additional_contexts).
 COPY --from=comun redact.py ./app/redact.py
 
-# Sin root. Solo lee correo y calendario: no necesita privilegios y no los tendra.
-RUN useradd --system --uid 10003 --no-create-home mcp \
+# Sin root. Solo lee de la API de GitHub: no necesita privilegios y no los tendra.
+RUN useradd --system --uid 10004 --no-create-home mcp \
     && chown -R mcp:mcp /app
 USER mcp
 

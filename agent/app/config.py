@@ -68,6 +68,7 @@ class Settings(BaseSettings):
     mcp_servidores: dict[str, str] = {
         "homelab": "http://homelab-mcp:8000/mcp",
         "google": "http://google-mcp:8000/mcp",
+        "github": "http://github-mcp:8000/mcp",
     }
     # Tope de rondas del bucle de herramientas. Sin esto, un modelo que se
     # enrosca llamando a la misma herramienta se come el presupuesto de madrugada.
@@ -98,6 +99,9 @@ class Settings(BaseSettings):
     briefing_cron: str = "30 7 * * *"
     # Vacia = la de por defecto, QUERY_BRIEFING.
     briefing_query: str = ""
+    # A partir de cuantos dias sin tocarla una PR abierta ya reclama algo. Tres
+    # es un fin de semana largo: menos y el briefing te cuenta la de ayer.
+    briefing_pr_dias: int = 3
     # Si no ha terminado en esto, se da por fallido y se avisa.
     briefing_timeout: float = 300.0
     # ntfy propio, por la red puente. El token solo publica en el topic.

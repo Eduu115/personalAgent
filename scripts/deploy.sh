@@ -93,13 +93,21 @@ for credencial in GMAIL_USUARIO GMAIL_APP_PASSWORD GOOGLE_ICAL_URLS; do
         || fallo "$credencial vacia en .env: google-mcp anuncia igual sus herramientas y fallan al llamarlas ('sin configurar'). Rellenala, o quita google-mcp del compose si lo quieres apagado de verdad"
 done
 
-# redact.py vive duplicado en los dos MCP a proposito (40 lineas son mas baratas
-# que compartir contexto de build), pero son las reglas de redaccion de
-# secretos: codigo de seguridad. Ya paso una vez que una copia tenia un fallo
-# que la otra no. Mientras algo compruebe que son identicas, la duplicacion es
-# contabilidad; sin eso, es que hay dos versiones de la misma barrera.
-cmp -s homelab-mcp/app/redact.py google-mcp/app/redact.py \
-    || fallo "las dos copias de redact.py han divergido: son las reglas que tapan los secretos antes de que salgan de un MCP, y una copia con un fallo que la otra no tiene es justo como se escapa uno. Miralo con: diff homelab-mcp/app/redact.py google-mcp/app/redact.py"
+# github-mcp no arranca sin repos ni token, y eso es lo correcto (una capacidad
+# apagada se tiene que ver), pero el agente lo tiene en mcp_servidores: sin
+# configurar saldria como sin_respuesta en /readyz todas las mananas. O esta, o
+# se quita el servicio del compose.
+for variable in GITHUB_REPOS GITHUB_TOKEN; do
+    grep -qE "^$variable=.+" .env \
+        || fallo "$variable vacia en .env: github-mcp no arrancaria y el agente lo daria por caido en cada briefing. Rellenala (ver README: PAT de grano fino, solo lectura), o quita github-mcp del compose si lo quieres apagado de verdad"
+done
+
+# redact.py, una sola copia (comun/), que es lo que decia CLAUDE.md al llegar el
+# tercer servidor que lo necesita. Si reaparece una copia dentro de un servidor,
+# vuelven a ser dos versiones de la misma barrera de seguridad.
+copias="$(find . -name redact.py -not -path './.git/*' | sort | tr '\n' ' ')"
+[ "$copias" = "./comun/redact.py " ] \
+    || fallo "redact.py tiene que estar solo en comun/ y hay esto: $copias. Son las reglas que tapan los secretos antes de que salgan de un MCP, y dos copias es como una se queda sin un arreglo que tiene la otra"
 
 # Redis avisa en cada arranque: sin esto, un guardado en segundo plano puede
 # fallar si el sistema esta justo de memoria. Es configuracion del HOST y este
@@ -152,6 +160,12 @@ if puerto_ocupado "$GOOGLE_MCP_PORT" && ! contenedor_vivo puente-google-mcp; the
     fallo "el puerto $GOOGLE_MCP_PORT esta ocupado por otro proceso: ss -ltnp | grep $GOOGLE_MCP_PORT"
 fi
 
+GITHUB_MCP_PORT="$(sed -n 's/^GITHUB_MCP_PORT=//p' .env)"
+GITHUB_MCP_PORT="${GITHUB_MCP_PORT:-8424}"
+if puerto_ocupado "$GITHUB_MCP_PORT" && ! contenedor_vivo puente-github-mcp; then
+    fallo "el puerto $GITHUB_MCP_PORT esta ocupado por otro proceso: ss -ltnp | grep $GITHUB_MCP_PORT"
+fi
+
 # El socket de Docker solo lo ve el proxy. Si no esta, homelab-mcp no arranca.
 [ -S /var/run/docker.sock ] || fallo "no existe /var/run/docker.sock"
 
@@ -184,7 +198,7 @@ disponible_mib="$(awk '/^MemAvailable:/ {print int($2 / 1024)}' /proc/meminfo)"
 if ! contenedor_vivo puente-litellm && [ "$disponible_mib" -lt 1800 ]; then
     fallo "solo hay ${disponible_mib} MiB disponibles y el primer arranque necesita ~1,8 GiB"
 fi
-echo "OK: rama $RAMA, puertos agente $AGENT_PORT / litellm 4141 / mcp $MCP_PORT / google-mcp $GOOGLE_MCP_PORT / ntfy $NTFY_PORT, DOCKER_GID $DOCKER_GID, ${disponible_mib} MiB disponibles"
+echo "OK: rama $RAMA, puertos agente $AGENT_PORT / litellm 4141 / mcp $MCP_PORT / google-mcp $GOOGLE_MCP_PORT / github-mcp $GITHUB_MCP_PORT / ntfy $NTFY_PORT, DOCKER_GID $DOCKER_GID, ${disponible_mib} MiB disponibles"
 
 # ---------------------------------------------------------------- codigo
 
@@ -207,13 +221,15 @@ trap 'printf "\n--- fallo: estado del stack\n"; docker compose ps; docker compos
 # codigo. La F2 se llevo por delante una funcion que main.py seguia llamando y
 # el agente entro en bucle de reinicio: esto es para que eso pare aqui.
 log "comprobando que el codigo nuevo arranca"
-docker compose build agent homelab-mcp google-mcp
+docker compose build agent homelab-mcp google-mcp github-mcp
 docker compose run --rm --no-deps -T agent python -m app.pruebas \
     || fallo "el agente no arranca con este codigo: no se ha tocado la base de datos"
 docker compose run --rm --no-deps -T google-mcp python -m app.pruebas \
     || fallo "google-mcp no pasa sus comprobaciones: no se ha tocado la base de datos"
 docker compose run --rm --no-deps -T homelab-mcp python -c "import app.server" \
     || fallo "homelab-mcp no arranca con este codigo: no se ha tocado la base de datos"
+docker compose run --rm --no-deps -T github-mcp python -m app.pruebas \
+    || fallo "github-mcp no pasa sus comprobaciones: no se ha tocado la base de datos"
 
 # ---------------------------------------------------------------- base de datos
 
@@ -529,10 +545,17 @@ async def main():
     finally:
         await mcp_client.cerrar(sesiones)
     print("  herramientas anunciadas: " + ", ".join(sorted(anunciadas)))
-    malas = [n for n in anunciadas if any(p in n.lower() for p in ("despertar", "wol", "encender", "wake"))]
+    # Encender el PC: solo el boton de la consola.
+    # GitHub: solo lectura. Aprobar o mergear no son herramientas ni apagadas,
+    # asi que no pueden aparecer aqui ni por un despiste ni por un `if`.
+    prohibidas = ("despertar", "wol", "encender", "wake",
+                  "merge", "aprob", "approve", "close", "cerrar", "comment", "comenta", "review")
+    malas = [n for n in anunciadas if any(p in n.lower() for p in prohibidas)]
     if malas:
         print("  ERROR: esto no puede ser una herramienta: " + ", ".join(malas))
         sys.exit(1)
+    dev = sorted(n for n in anunciadas if n.startswith("dev_"))
+    print("  github anuncia solo lectura: " + (", ".join(dev) or "nada"))
     print("  ninguna deja encender nada: el boton de la consola es el unico camino")
 
 asyncio.run(main())

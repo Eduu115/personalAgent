@@ -206,11 +206,18 @@ def query_del_briefing() -> None:
     try:
         assert settings.query_briefing == QUERY_BRIEFING, "sin BRIEFING_QUERY tiene que valer la de por defecto"
         settings.briefing_query = "in:inbox otra-cosa"
-        prompt = briefing.PROMPT_PLANTILLA.format(query=settings.query_briefing)
+        prompt = briefing.PROMPT_PLANTILLA.format(
+            query=settings.query_briefing, pr_dias=settings.briefing_pr_dias
+        )
         assert "in:inbox otra-cosa" in prompt and QUERY_BRIEFING not in prompt, "el prompt no coge la configurada"
+        # Y que el briefing pida SOLO las PRs que reclaman algo: un listado de
+        # todas las abiertas cada manana se deja de leer a los tres dias.
+        assert "dev_prs" in prompt and f"{settings.briefing_pr_dias} días" in prompt, prompt
+        assert "SOLO las que lo necesitan" in prompt
     finally:
         settings.briefing_query = original
     print(f"OK consulta del briefing desde configuracion: {settings.query_briefing}")
+    print(f"OK el briefing pide solo las PRs que reclaman algo (paradas >{settings.briefing_pr_dias} dias)")
 
 
 async def atajo_del_estado() -> None:
@@ -380,6 +387,24 @@ async def candado_de_acciones() -> None:
         (db.log_tool_call, acciones._al_helper, settings.read_only, settings.equipos_despertables) = original
 
 
+def github_solo_lee() -> None:
+    """Ninguna herramienta de github puede escribir, ni existe apagada.
+
+    El mapa de riesgo es lo que el agente esta dispuesto a ejecutar: si algun
+    dia alguien mete ahi un dev_merge, esto lo ve antes que el server. Lo que
+    ANUNCIA el servidor lo comprueba deploy.sh, que es la otra mitad.
+    """
+    from . import herramientas
+
+    dev = {n: r for n, r in herramientas.RIESGO.items() if n.startswith("dev_")}
+    assert dev, "no hay ninguna herramienta de github en el mapa de riesgo"
+    assert set(dev.values()) == {"read"}, f"esto no es de lectura: {dev}"
+    prohibidas = ("merge", "aprob", "approve", "cerrar", "close", "comenta", "comment", "review")
+    culpables = [n for n in herramientas.RIESGO if any(p in n.lower() for p in prohibidas)]
+    assert not culpables, f"herramientas que actuan sobre PRs: {culpables}"
+    print(f"OK github: {', '.join(sorted(dev))}, las tres read y ninguna que escriba")
+
+
 def rutas() -> None:
     """Las rutas que abren los botones del push siguen existiendo."""
     caminos = {r.path for r in main.app.routes}
@@ -405,6 +430,7 @@ if __name__ == "__main__":
     referencias()
     identidad()
     query_del_briefing()
+    github_solo_lee()
     rutas()
     consola()
     consola_no_llama_al_modelo()

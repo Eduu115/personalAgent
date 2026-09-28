@@ -344,6 +344,55 @@ Mientras esta en ambient pide `navigator.wakeLock` para que la tablet no apague
 la pantalla, y lo suelta al salir. Si el navegador no lo soporta, el resto
 funciona igual.
 
+## GitHub: las PRs, solo mirar
+
+`github-mcp` da tres herramientas y las tres son de lectura:
+
+| Herramienta | Que hace |
+|---|---|
+| `dev_prs` | Las PRs abiertas de los repos configurados: titulo, autor, dias abierta y sin tocar, si es borrador, como va el CI y como van las reviews. Primero las que tienen el CI en rojo |
+| `dev_checks(repo, n)` | Cada check de esa PR y como acabo, para saber cual se ha roto |
+| `dev_diff(repo, n)` | El diff, con los secretos redactados y capado a 4.000 caracteres |
+
+**No hay ninguna que escriba y no la va a haber**: ni aprobar, ni mergear, ni
+comentar, ni cerrar. Tampoco existen apagadas. El despliegue lo comprueba
+contra lo que anuncia el servidor, no contra lo que ponga en el codigo.
+
+Lo que devuelve es contenido de fuera, como un correo: cualquiera puede abrir
+una PR en un repo publico y escribir lo que le de la gana en el titulo. Todo
+pasa por `redact.py` y llega marcado como datos, no instrucciones.
+
+El briefing de las 7:30 incluye solo las PRs que reclaman algo: CI en rojo,
+paradas mas de `BRIEFING_PR_DIAS` dias (3 por defecto) o con reviews
+pendientes. Si no hay ninguna asi, no dice nada de esto.
+
+### El token
+
+Un **PAT de grano fino y de solo lectura**. En GitHub:
+Settings -> Developer settings -> Personal access tokens -> Fine-grained tokens
+-> Generate new token.
+
+- **Repository access**: "Only select repositories", y eliges los tuyos. Nada de
+  "All repositories".
+- **Repository permissions**, todos en *Read-only*:
+  - `Metadata` (obligatorio, lo pone GitHub solo),
+  - `Pull requests`,
+  - `Checks`.
+  - Si el repo es privado y `dev_diff` da 404, anade `Contents` en *Read-only*.
+- **Ningun permiso de escritura.** Si le das `Pull requests: Read and write`, el
+  token podria mergear aunque el servidor no sepa hacerlo: la barrera de verdad
+  es que no exista la herramienta, pero un token de solo lectura es la segunda.
+- Ponle caducidad. Cuando caduque, el servidor lo dira con un 401 claro.
+
+Y en el `.env`:
+
+```
+GITHUB_REPOS=Eduu115/personalAgent,Eduu115/apiarena
+GITHUB_TOKEN=github_pat_...
+```
+
+Sin las dos, `github-mcp` no arranca y el despliegue se para diciendolo.
+
 ## Aprobaciones: las herramientas que escriben
 
 `mail_borrador` y `lab_reiniciar` no se ejecutan solas. Cuando el modelo pide

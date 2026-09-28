@@ -403,7 +403,10 @@ function ocupado() {
   if ($("#enviar").disabled) return true;            // hay un turno en curso
   if (resueltas.size) return true;                   // una aprobacion ejecutandose
   if (ambiente) return false;                        // en ambient no hay nadie tecleando
-  return chatALaVista() && (!!$("#entrada").value.trim() || hilo().children.length > 0);
+  // Que haya conversacion en pantalla ya no frena nada: al recargar se
+  // restaura sola. Lo unico que no se puede pisar es lo que aun no se ha
+  // enviado, que no esta guardado en ningun sitio.
+  return chatALaVista() && !!$("#entrada").value.trim();
 }
 
 function mirarVersion(version) {
@@ -493,6 +496,29 @@ async function cargarEstado() {
 
 // ---------------------------------------------------------------- chat
 let conversacion = null;
+
+// El hilo vivia solo en el DOM: una recarga, cerrar la pestana o que se
+// bloquee la tablet se lo llevaba, con los mensajes guardados en Postgres
+// desde la F0. Al cargar se recupera la ultima conversacion y se pinta.
+async function restaurarConversacion() {
+  try {
+    const r = await fetch("/api/conversations?limit=1");
+    const ultima = (await r.json()).conversations?.[0];
+    if (!ultima || !ultima.message_count) return;
+    const mensajes = (await (await fetch(`/api/conversations/${ultima.id}`)).json()).messages || [];
+    if (!mensajes.length) return;
+    conversacion = ultima.id;
+    hilo().append(crear("div", "evento", `↻ ${ultima.title || "Conversación anterior"} · ${cuando(ultima.updated_at)}`));
+    for (const m of mensajes) {
+      if (m.role === "user" || m.role === "assistant") {
+        hilo().append(crear("div", "msg " + (m.role === "user" ? "yo" : "el"), m.content));
+      }
+    }
+    alFinal();
+  } catch (e) {
+    // Sin historial se sigue: es una comodidad, no el chat.
+  }
+}
 const hilo = () => $("#hilo");
 const alFinal = () => hilo().scrollTop = hilo().scrollHeight;
 
@@ -917,6 +943,7 @@ programar(REFRESCOS.normal);
 cargarAprobaciones();
 cargarEstado();
 cargarBriefings();
+restaurarConversacion();
 cargarAcciones();   // la lista sale del .env: no cambia sola, se pide una vez
 for (const ev of ["pointerdown", "keydown", "wheel", "touchstart"]) addEventListener(ev, despertar, { passive: true });
 // El sistema suelta el wakeLock al ocultar la pagina; si seguimos en ambient, se vuelve a pedir.
