@@ -26,7 +26,7 @@ from uuid import UUID
 
 from mcp import types
 
-from . import aprobaciones, db, memoria
+from . import aprobaciones, db, memoria, mcp_client
 from .config import settings
 from .llm import Llamada
 from .mcp_client import Sesion
@@ -325,3 +325,36 @@ async def ejecutar(
     )
     # error solo es None cuando se ejecuto bien, y entonces texto existe
     return Resultado(status, sobre(llamada.nombre, status, error if error is not None else texto))
+
+
+# ------------------------------------------------------------------ atajo de lectura
+
+
+async def _leer(sesiones: dict[str, Any], ruta: dict[str, str], nombre: str) -> Any:
+    """Llama a una herramienta saltandose ejecutar(). Solo de lectura.
+
+    Este atajo existe para no pagar tokens por un `docker ps`: lo usan la
+    consola (que pinta tiles cada 15 s) y la vigilancia (que mira el disco cada
+    5 min). Se salta el mapa de riesgo, el audit log, el kill switch y la
+    comprobacion de origin, asi que el candado es esta linea: lo que no sea de
+    lectura revienta aqui en vez de colarse por la puerta de atras.
+    """
+    if RIESGO.get(nombre) != "read":
+        raise RuntimeError(f"'{nombre}' no es de lectura: no se puede llamar por el atajo")
+    servidor = ruta.get(nombre)
+    if servidor is None:
+        raise RuntimeError(f"'{nombre}' no la ofrece ahora ningun servidor MCP")
+    fallo, texto = await sesiones[servidor].invocar(nombre, {})
+    if fallo:
+        raise RuntimeError(texto[:200])
+    return json.loads(texto)
+
+
+async def solo_lectura(*nombres: str) -> list[Any]:
+    """Varias herramientas de lectura del MCP a la vez, sin modelo por medio."""
+    sesiones = mcp_client.sesiones()
+    try:
+        catalogo = await ofrecidas(sesiones)
+        return list(await asyncio.gather(*(_leer(sesiones, catalogo.ruta, n) for n in nombres)))
+    finally:
+        await mcp_client.cerrar(sesiones)

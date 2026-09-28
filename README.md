@@ -408,6 +408,32 @@ GITHUB_TOKEN=github_pat_...
 
 Sin las dos, `github-mcp` no arranca y el despliegue se para diciendolo.
 
+## Avisos: la vigilancia
+
+Un job cada 5 minutos mira RAM y disco del host, cada contenedor por su nombre,
+el helper, que el briefing haya salido, la caducidad del token de GitHub y el
+presupuesto de la API.
+
+**Avisa de transiciones, no de estados.** Cuando algo pasa de bien a mal, un
+push. Mientras sigue mal, silencio. Cuando vuelve, otro push. Nada de avisar al
+primer cruce: el cambio tiene que verse 3 veces seguidas, y los umbrales de
+subida y bajada son distintos (85% para avisar del disco, 80% para darlo por
+recuperado) para que algo que oscila no mande un aviso por oscilacion.
+
+Va a su propio topic, **`avisos`**, separado de `aprobaciones` a proposito: si
+algun dia te hartas de los avisos puedes silenciar ese canal sin silenciar los
+botones de aprobar, que son lo unico que no se puede perder.
+
+```bash
+curl -s -X POST localhost:8420/api/vigilancia   # una pasada a mano
+docker compose exec postgres psql -U puente -d puente \
+  -c "select nombre, estado, desde, detalle from vigilancias order by estado, nombre;"
+```
+
+Llamarla dos veces seguidas no manda dos avisos: eso es justo lo que se intenta
+evitar. **No arregla nada**: solo llama a herramientas de lectura, y el atajo
+que usa rechaza cualquier otra cosa.
+
 ## Aprobaciones: las herramientas que escriben
 
 `mail_borrador` y `lab_reiniciar` no se ejecutan solas. Cuando el modelo pide

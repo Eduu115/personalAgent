@@ -93,9 +93,9 @@ async def arranque() -> None:
         # ventana de 2 h, o no hay nada que recuperar y la prueba dependeria de
         # la hora a la que se ejecute.
         for cron, hecho_ya, esperados in (
-            ("30 7 * * *", True, {"briefing", "caducar-aprobaciones", "purgar-audit"}),
+            ("30 7 * * *", True, {"briefing", "caducar-aprobaciones", "purgar-audit", "vigilancia"}),
             # Sin briefing reciente: ademas se programa el que se perdio.
-            ("*/5 * * * *", False, {"briefing", "caducar-aprobaciones", "purgar-audit", "briefing-recuperado"}),
+            ("*/5 * * * *", False, {"briefing", "caducar-aprobaciones", "purgar-audit", "vigilancia", "briefing-recuperado"}),
         ):
             registrados.clear()
             settings.briefing_cron = cron
@@ -113,8 +113,8 @@ async def arranque() -> None:
         settings.briefing_cron = ""
         async with main.lifespan(main.app):
             pass
-        assert {i for i, _ in registrados} == {"caducar-aprobaciones", "purgar-audit"}
-        print("OK lifespan sin briefing: caducar-aprobaciones, purgar-audit")
+        assert {i for i, _ in registrados} == {"caducar-aprobaciones", "purgar-audit", "vigilancia"}
+        print("OK lifespan sin briefing: caducar-aprobaciones, purgar-audit, vigilancia")
     finally:
         (main.AsyncIOScheduler, db.open_pool, db.close_pool, db.hay_briefing_desde, briefing.lanzar) = original
 
@@ -228,26 +228,30 @@ def query_del_briefing() -> None:
 
 
 async def atajo_del_estado() -> None:
-    """El atajo de /api/estado solo deja pasar herramientas de lectura."""
+    """El atajo directo al MCP solo deja pasar herramientas de lectura.
+
+    Lo usan la consola (tiles cada 15 s) y la vigilancia (disco y contenedores
+    cada 5 min), los dos saltandose ejecutar(): ni audit log, ni kill switch, ni
+    origin. El candado es este, asi que se prueba aqui y no en cada usuario.
+    """
     from . import herramientas
-    from .routes import consola as vista
 
     for nombre in ("lab_reiniciar", "lab_update_stack", "mail_borrador", "memoria_guardar", "no_existe"):
         try:
-            await vista._leer({}, {nombre: "homelab"}, nombre)
+            await herramientas._leer({}, {nombre: "homelab"}, nombre)
         except RuntimeError as exc:
             assert "no es de lectura" in str(exc), (nombre, exc)
         else:
-            raise AssertionError(f"'{nombre}' ha pasado por el atajo de la consola")
+            raise AssertionError(f"'{nombre}' ha pasado por el atajo")
     # Y una de lectura si pasa el candado: falla despues, al buscar la sesion.
     assert herramientas.RIESGO["lab_status"] == "read"
     try:
-        await vista._leer({}, {"lab_status": "homelab"}, "lab_status")
+        await herramientas._leer({}, {"lab_status": "homelab"}, "lab_status")
     except KeyError:
         pass
     else:
         raise AssertionError("sin sesiones tendria que haber fallado al enrutar")
-    print("OK atajo de /api/estado: solo herramientas de lectura")
+    print("OK atajo directo al MCP: solo herramientas de lectura")
 
 
 def consola() -> None:
@@ -412,12 +416,119 @@ def github_solo_lee() -> None:
     print(f"OK github: {', '.join(sorted(dev))}, las tres read y ninguna que escriba")
 
 
+def transiciones_de_vigilancia() -> None:
+    """bien->mal, mal->mal->mal (silencio) y mal->bien, con estado inventado.
+
+    El del medio es el que importa: es el que garantiza que algo roto durante
+    tres dias no te manda 864 avisos. Sin base de datos y sin esperar a que el
+    disco se llene: `decidir()` es una funcion pura y por eso existe.
+    """
+    from datetime import datetime, timedelta
+
+    from . import vigilancia
+    from .config import MADRID
+
+    def correr(secuencia, estado_inicial=None):
+        """Pasa una secuencia de estados por el motor y devuelve cuando avisa."""
+        estados = dict(estado_inicial or {})
+        avisos = []
+        for paso, estado in enumerate(secuencia, 1):
+            medidas = {"disco:/": vigilancia.Medida(estado, f"Disco / paso {paso}")}
+            trans, guardar = vigilancia.decidir(medidas, estados)
+            avisos += [(paso, t.estado) for t in trans]
+            for nombre, (est, cand, racha, det, cambia) in guardar.items():
+                fila = estados.setdefault(nombre, {"desde": datetime.now(MADRID)})
+                fila.update(estado=est, candidato=cand, racha=racha, detalle=det)
+                if cambia:
+                    fila["desde"] = datetime.now(MADRID)
+        return avisos, estados
+
+    n = vigilancia.CONFIRMACIONES
+    assert n >= 2, "con una sola comprobacion no hay histeresis que valga"
+
+    # 1. bien -> mal: no avisa hasta la enesima seguida.
+    avisos, estados = correr(["mal"] * n)
+    assert avisos == [(n, "mal")], f"tendria que avisar solo en el paso {n}: {avisos}"
+    assert estados["disco:/"]["estado"] == "mal"
+
+    # 2. mal -> mal -> mal...: silencio absoluto. Este es el que importa.
+    avisos, _ = correr(["mal"] * 200, estados)
+    assert avisos == [], f"algo roto un rato largo ha mandado {len(avisos)} avisos de mas"
+
+    # 3. mal -> bien: tambien confirmandose, y solo un aviso.
+    avisos, estados = correr(["bien"] * n, estados)
+    assert avisos == [(n, "bien")], avisos
+    assert estados["disco:/"]["estado"] == "bien"
+
+    # 4. Un pico suelto no cuenta: se rompe la racha y vuelta a empezar.
+    avisos, _ = correr((["mal"] * (n - 1) + ["bien"]) * 20, estados)
+    assert avisos == [], f"un pico de treinta segundos ha avisado: {avisos}"
+
+    # 5. La banda entre los dos umbrales no mueve nada (estado None).
+    avisos, _ = correr([None] * 50, estados)
+    assert avisos == []
+
+    # 6. Y lo que no se ha visto nunca se da por bueno: la primera vez que algo
+    #    esta mal, avisa. Si no, estrenaria en silencio.
+    avisos, _ = correr(["mal"] * n, {})
+    assert avisos == [(n, "mal")], avisos
+
+    # 7. El "desde" solo se mueve en la transicion, que es lo que deja decir
+    #    "lleva tres horas asi" en el aviso.
+    hace_rato = datetime.now(MADRID) - timedelta(hours=3)
+    estados = {"disco:/": {"estado": "mal", "candidato": None, "racha": 0, "desde": hace_rato}}
+    trans, guardar = vigilancia.decidir({"disco:/": vigilancia.Medida("mal", "sigue")}, estados)
+    assert not trans and guardar["disco:/"][4] is False, "sin cambio no se toca desde"
+    assert vigilancia.cuanto(hace_rato) == "3 h", vigilancia.cuanto(hace_rato)
+
+    # 8. Y los umbrales de subida y bajada son distintos: entre 80 y 85 no pasa nada.
+    sube, baja = 85.0, 80.0
+    assert vigilancia.por_umbral(86, sube, baja) == "mal"
+    assert vigilancia.por_umbral(84, sube, baja) is None, "84 esta en la banda: no mueve"
+    assert vigilancia.por_umbral(81, sube, baja) is None
+    assert vigilancia.por_umbral(80, sube, baja) == "bien"
+    print(f"OK vigilancia: avisa a la {n}a seguida, calla 200 veces seguidas, y un pico no cuenta")
+
+
+async def vigilancia_no_escribe() -> None:
+    """La proactividad detecta y avisa. No arregla, y no puede.
+
+    Todo lo que mira va por el atajo de solo lectura, que revienta con
+    cualquier cosa que no sea de nivel `read`. Si algun dia quiere arreglar
+    algo, eso pasa por la cola de aprobaciones como todo lo demas.
+    """
+    import inspect
+
+    from . import herramientas, vigilancia
+
+    fuente = inspect.getsource(vigilancia)
+    for prohibido in ("ejecutar(", "herramientas.ejecutar", "aprobaciones.encolar", "_al_helper(\"despertar"):
+        assert prohibido not in fuente, f"vigilancia.py usa {prohibido}"
+
+    # Las herramientas que nombra, todas de lectura.
+    usadas = {n for n in herramientas.RIESGO if f'"{n}"' in fuente}
+    assert usadas, "no se ha encontrado ninguna herramienta en vigilancia.py"
+    no_lectura = {n for n in usadas if herramientas.RIESGO[n] != "read"}
+    assert not no_lectura, f"la vigilancia usa herramientas que escriben: {no_lectura}"
+
+    # Y el atajo que usa no deja pasar otra cosa, aunque alguien lo intente.
+    for escritura in ("lab_reiniciar", "mail_borrador"):
+        try:
+            await herramientas.solo_lectura(escritura)
+        except RuntimeError as exc:
+            assert "no es de lectura" in str(exc), exc
+        else:
+            raise AssertionError(f"{escritura} ha pasado por el atajo de la vigilancia")
+    print(f"OK vigilancia: solo lee ({', '.join(sorted(usadas))}) y el atajo rechaza lo demas")
+
+
 def rutas() -> None:
     """Las rutas que abren los botones del push siguen existiendo."""
     caminos = {r.path for r in main.app.routes}
     for ruta in (
         "/api/chat",
         "/api/briefing",
+        "/api/vigilancia",
         "/api/aprobaciones",
         "/api/estado",
         "/api/agenda",
@@ -438,6 +549,7 @@ if __name__ == "__main__":
     identidad()
     query_del_briefing()
     github_solo_lee()
+    transiciones_de_vigilancia()
     rutas()
     consola()
     consola_no_llama_al_modelo()
@@ -446,5 +558,6 @@ if __name__ == "__main__":
     asyncio.run(catalogo_propio())
     asyncio.run(candados_memoria())
     asyncio.run(candado_de_acciones())
+    asyncio.run(vigilancia_no_escribe())
     asyncio.run(arranque())
     print("todo OK")

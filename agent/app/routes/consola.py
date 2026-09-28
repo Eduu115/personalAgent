@@ -74,39 +74,8 @@ async def pendientes() -> dict[str, Any]:
     }
 
 
-async def _leer(sesiones: dict[str, Any], ruta: dict[str, str], nombre: str) -> Any:
-    """Llama a una herramienta saltandose ejecutar(). Solo de lectura.
-
-    Este atajo existe para no pagar tokens por un `docker ps`, pero se salta el
-    mapa de riesgo, el audit log, el kill switch y la comprobacion de origin.
-    Hoy las dos que usa son de lectura; el dia que alguien enchufe aqui una de
-    escritura, que reviente en vez de colarse por la puerta de atras.
-    """
-    if herramientas.RIESGO.get(nombre) != "read":
-        raise RuntimeError(
-            f"'{nombre}' no es de lectura: la consola no puede llamarla por el atajo de /api/estado"
-        )
-    servidor = ruta.get(nombre)
-    if servidor is None:
-        raise RuntimeError(f"'{nombre}' no la ofrece ahora ningun servidor MCP")
-    fallo, texto = await sesiones[servidor].invocar(nombre, {})
-    if fallo:
-        raise RuntimeError(texto[:200])
-    return json.loads(texto)
-
-
-async def _del_mcp(*nombres: str) -> list[Any]:
-    """Varias herramientas de lectura del MCP a la vez, sin modelo por medio."""
-    sesiones = mcp_client.sesiones()
-    try:
-        catalogo = await herramientas.ofrecidas(sesiones)
-        return list(await asyncio.gather(*(_leer(sesiones, catalogo.ruta, n) for n in nombres)))
-    finally:
-        await mcp_client.cerrar(sesiones)
-
-
 async def _estado() -> dict[str, Any]:
-    contenedores, anfitrion = await _del_mcp("lab_status", "lab_host")
+    contenedores, anfitrion = await herramientas.solo_lectura("lab_status", "lab_host")
     return {
         "docker": contenedores.get("docker", {}),
         "contenedores": contenedores.get("contenedores", []),
@@ -135,7 +104,7 @@ async def estado():
 
 
 async def _agenda() -> dict[str, Any]:
-    (datos,) = await _del_mcp("cal_agenda")   # dias=1 por defecto: hoy
+    (datos,) = await herramientas.solo_lectura("cal_agenda")   # dias=1 por defecto: hoy
     return datos
 
 

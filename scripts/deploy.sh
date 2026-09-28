@@ -184,8 +184,17 @@ fi
 
 # Los botones de aprobar van a un topic aparte: si ntfy no lo concede, el push
 # sale con 403 y las aprobaciones no llegan a ningun sitio.
-docker compose config 2>/dev/null | grep -E '^\s+NTFY_AUTH_ACCESS:' | grep -q 'aprobaciones' \
-    || fallo "el topic 'aprobaciones' no esta en NTFY_AUTH_ACCESS (docker-compose.yml)"
+acceso_ntfy="$(docker compose config 2>/dev/null | grep -E '^\s+NTFY_AUTH_ACCESS:' || true)"
+for topic in aprobaciones avisos; do
+    printf '%s' "$acceso_ntfy" | grep -q "puente:$topic:wo" \
+        || fallo "el topic '$topic' no esta en NTFY_AUTH_ACCESS (docker-compose.yml): los push no llegarian"
+done
+# Y que sigan siendo dos canales. Compartirlos significa que el dia que te
+# hartes de los avisos silencias tambien los botones de aprobar, que es lo unico
+# que no se puede permitir silenciar.
+[ "$(sed -n 's/^NTFY_TOPIC_AVISOS=//p' .env)" = "$(sed -n 's/^NTFY_TOPIC_APROBACIONES=//p' .env)" ] \
+    && [ -n "$(sed -n 's/^NTFY_TOPIC_AVISOS=//p' .env)" ] \
+    && fallo "NTFY_TOPIC_AVISOS y NTFY_TOPIC_APROBACIONES son el mismo topic: tienen que ir separados"
 
 # Contenedores llamados puente-* que no son de este proyecto compose.
 ajenos="$(docker ps -a --filter 'name=^puente-' \

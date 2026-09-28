@@ -109,6 +109,27 @@ class Settings(BaseSettings):
     ntfy_topic: str = "briefing"
     ntfy_token_publicar: str = ""
     ntfy_topic_aprobaciones: str = "aprobaciones"
+    # Topic aparte para los avisos de la vigilancia, y no es un capricho: las
+    # aprobaciones son lo unico que no se puede permitir silenciar, y si
+    # comparten canal, el dia que te hartes de los avisos silencias las dos.
+    ntfy_topic_avisos: str = "avisos"
+
+    # Vigilancia. Umbrales de subida y de bajada distintos a proposito: con uno
+    # solo, algo que oscile alrededor del limite manda un aviso por oscilacion.
+    umbral_disco: float = 85.0
+    umbral_disco_baja: float = 80.0
+    umbral_ram: float = 85.0
+    umbral_ram_baja: float = 80.0
+    # Cada cuanto se mira. Con CONFIRMACIONES=3, un cambio tarda 15 min en
+    # confirmarse, que es el precio de no avisar de un pico de treinta segundos.
+    vigilancia_minutos: int = 5
+    # Cuanto se le perdona al briefing antes de darlo por no salido.
+    briefing_margen_min: int = 45
+    # A que porcentaje del tope de gasto se avisa, y a cual se insiste.
+    presupuesto_aviso: float = 80.0
+    presupuesto_critico: float = 95.0
+    # Dias que quedan para que caduque un secreto antes de que sea un aviso.
+    aviso_caducidad_dias: int = 14
     # La URL del agente en el tailnet: la abren los botones del push de
     # aprobacion y el enlace a la conversacion del briefing. Mientras no haya
     # PWA, ese enlace es el JSON de /api/conversations/<id>.
