@@ -364,7 +364,17 @@ pasa por `redact.py` y llega marcado como datos, no instrucciones.
 
 El briefing de las 7:30 incluye solo las PRs que reclaman algo: CI en rojo,
 paradas mas de `BRIEFING_PR_DIAS` dias (3 por defecto) o con reviews
-pendientes. Si no hay ninguna asi, no dice nada de esto.
+pendientes. Una PR abierta ayer que va bien no se menciona, y si no hay ninguna
+que reclame nada la seccion no sale: ni "todo en orden" ni el recuento de las
+abiertas. Con cuatro repos, ese filtro es lo que separa un briefing de un
+listado.
+
+**"sin checks" no es "pasando"**: quiere decir que ese commit no lo comprueba
+nadie. De los cuatro repos configurados solo API-ARENA tiene workflows de
+Actions, asi que va a ser lo normal. Cuando `dev_checks` no encuentra ninguno,
+la respuesta explica por que (el repo no tiene Actions, o las tiene y no se
+disparan con esta PR) en vez de devolver una lista vacia que se lee como todo
+verde.
 
 ### El token
 
@@ -382,12 +392,17 @@ Settings -> Developer settings -> Personal access tokens -> Fine-grained tokens
 - **Ningun permiso de escritura.** Si le das `Pull requests: Read and write`, el
   token podria mergear aunque el servidor no sepa hacerlo: la barrera de verdad
   es que no exista la herramienta, pero un token de solo lectura es la segunda.
-- Ponle caducidad. Cuando caduque, el servidor lo dira con un 401 claro.
+- Ponle caducidad, y **no te va a pillar por sorpresa**: GitHub manda la fecha
+  en una cabecera de cada respuesta, `github-mcp` la lee al arrancar y la
+  escribe en el log, `/healthz` la publica y `deploy.sh` avisa cuando quedan 14
+  dias o menos. Si caduca sin mas, el briefing dejaria de mencionar PRs sin
+  decir por que. Cuando lo renueves, cambia `GITHUB_TOKEN` en el `.env` y
+  vuelve a desplegar.
 
 Y en el `.env`:
 
 ```
-GITHUB_REPOS=Eduu115/personalAgent,Eduu115/apiarena
+GITHUB_REPOS=Eduu115/API-ARENA,Eduu115/personalAgent,Eduu115/saveToWin,Eduu115/merceria-ConfeccionesAnaMari
 GITHUB_TOKEN=github_pat_...
 ```
 

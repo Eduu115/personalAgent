@@ -398,6 +398,23 @@ confiable. En el diff se redacta ANTES de truncar: al reves, una clave partida
 por el corte deja su primera mitad dentro. Hay un test con una PR ficticia cuyo
 titulo y cuerpo intentan una inyeccion, igual que el que ya habia para el correo.
 
+**"sin checks" no es "pasando".** De los cuatro repos configurados solo
+API-ARENA tiene workflows de Actions, asi que una lista vacia de checks va a ser
+lo normal, y devolverla pelada se lee como todo verde. `dev_checks` dice por
+que no hay ninguno (el repo no tiene Actions, las tiene y no se disparan con
+esta PR, o no se ha podido mirar), y esa llamada de mas solo se hace cuando la
+lista viene vacia. Lo de mirar los checks de verdad queda aparcado hasta que
+esos repos tengan Actions corriendo.
+
+**El token caduca y eso no puede pasar en silencio.** GitHub manda la fecha en
+la cabecera `github-authentication-token-expiration` de cada respuesta;
+`github-mcp` la lee con una llamada barata al arrancar, la loguea y la guarda.
+`/healthz` la publica y calcula los dias EN EL MOMENTO de preguntar (guardar
+los dias seria mentir en un contenedor que lleva tres semanas arriba), y
+`deploy.sh` avisa si quedan 14 o menos. Sin esto, el dia que caducara el
+briefing dejaria de mencionar PRs sin decir por que, que es exactamente la
+degradacion silenciosa de la que ya llevamos demasiadas.
+
 `redact.py` ya no esta duplicado: al llegar el tercer servidor que lo necesita
 paso a `comun/redact.py`, que los Dockerfiles meten con `COPY --from=comun`
 (`additional_contexts` del compose). `deploy.sh` comprueba que no reaparece

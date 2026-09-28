@@ -528,6 +528,31 @@ SOCK
     done
 fi
 
+# El token de GitHub caduca, y el dia que lo haga el briefing dejaria de
+# mencionar PRs sin decir por que. La fecha la manda GitHub en una cabecera y
+# github-mcp la lee al arrancar; aqui solo se pregunta. Avisa, no aborta: un
+# token a punto de caducar sigue funcionando hoy.
+caducidad="$(docker compose exec -T github-mcp python -c "
+import json, urllib.request
+print(urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=5).read().decode())" 2>/dev/null || echo '{}')"
+dias="$(printf '%s' "$caducidad" | python3 -c 'import json, sys
+try: print(json.load(sys.stdin).get("dias_para_caducar") or "")
+except Exception: print("")')"
+fecha="$(printf '%s' "$caducidad" | python3 -c 'import json, sys
+try: print(json.load(sys.stdin).get("token_caduca") or "")
+except Exception: print("")')"
+# %% y no %: la cabecera trae "2026-12-15 23:59:59 UTC" y aqui sobra la hora.
+renovar="Renuevalo en Settings -> Developer settings -> Fine-grained tokens (ver README) y cambia GITHUB_TOKEN en el .env"
+if [ -z "$fecha" ]; then
+    echo "AVISO: el token de GitHub no dice cuando caduca (no es un PAT de grano fino). Nadie avisara el dia que deje de valer, y el briefing dejara de hablar de PRs sin explicar por que"
+elif [ -n "$dias" ] && [ "$dias" -le 0 ]; then
+    echo "AVISO: el token de GitHub CADUCO el ${fecha%% *}, hace $(( -dias )) dias. Las PRs ya no se estan mirando. $renovar"
+elif [ -n "$dias" ] && [ "$dias" -le 14 ]; then
+    echo "AVISO: el token de GitHub caduca el ${fecha%% *} y quedan $dias dias. $renovar"
+else
+    echo "github: el token caduca el ${fecha%% *} (quedan ${dias:-?} dias)"
+fi
+
 # Encender el PC no es una herramienta y no puede llegar a serlo por descuido:
 # si apareciera en tools/list, el modelo la veria en su catalogo y bastaria con
 # que un correo le convenciera. Se mira lo que ANUNCIAN los servidores, no lo
