@@ -12,6 +12,12 @@
 //
 // El manejador de fetch existe porque el navegador lo exige para considerar la
 // pagina instalable, pero no responde: todo va a la red.
+// skipWaiting en la instalacion y claim al activar: la consola se recarga sola
+// cuando ve una version nueva del agente, y una recarga contra el service
+// worker viejo no sirve de nada. El mensaje es por si acaso se quedo esperando.
 self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("message", (evento) => {
+  if (evento.data === "skipWaiting") self.skipWaiting();
+});
 self.addEventListener("activate", (evento) => evento.waitUntil(self.clients.claim()));
 self.addEventListener("fetch", () => {});

@@ -389,12 +389,53 @@ function barra(caja, titulo, usado, total, unidad, pct) {
 
 let datosEstado = null;
 
+// ---------------------------------------------------------------- version
+// La tablet de la pared es el unico aparato encendido todo el dia y el unico
+// que nadie va a recargar nunca: sin esto se queda con la version del dia que
+// la colgaste. La version llega en /api/estado, que ya se sondea cada 15 s.
+let versionVista = null;
+
+const chatALaVista = () => !$("#panel-chat").classList.contains("oculto");
+
+// Recargar pisando algo a medias es peor que seguir viejo un rato mas: se
+// espera al siguiente sondeo, que llega en 15 s.
+function ocupado() {
+  if ($("#enviar").disabled) return true;            // hay un turno en curso
+  if (resueltas.size) return true;                   // una aprobacion ejecutandose
+  if (ambiente) return false;                        // en ambient no hay nadie tecleando
+  return chatALaVista() && (!!$("#entrada").value.trim() || hilo().children.length > 0);
+}
+
+function mirarVersion(version) {
+  if (!version) return;
+  if (versionVista === null) { versionVista = version; return; }
+  if (version === versionVista || ocupado()) return;
+  recargar();
+}
+
+async function recargar() {
+  // Que el service worker nuevo tome el control ANTES de recargar: si no, la
+  // pagina vuelve a cargarse contra el viejo y la recarga no sirve de nada.
+  try {
+    const registro = await navigator.serviceWorker?.getRegistration();
+    if (registro) {
+      await registro.update();
+      registro.waiting?.postMessage("skipWaiting");
+      await new Promise((sigue) => setTimeout(sigue, 500));
+    }
+  } catch (e) {
+    /* sin service worker se recarga igual */
+  }
+  location.reload();
+}
+
 async function cargarEstado() {
   const caja = $("#estado");
   let datos;
   try {
     const r = await fetch("/api/estado");
     datos = await r.json();
+    mirarVersion(datos.version);   // tambien viene en el error: un MCP caido no puede dejarla vieja
     if (!r.ok) throw new Error(datos.error || r.status);
     pulso(true);
   } catch (e) {

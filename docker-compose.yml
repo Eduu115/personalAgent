@@ -148,6 +148,10 @@ services:
       DUENO: ${DUENO:-Edu}
       GMAIL_USUARIO: ${GMAIL_USUARIO:-}
       ZONA_HORARIA: ${ZONA_HORARIA:-Europe/Madrid}
+      # El SHA del commit desplegado, que pone deploy.sh. La consola lo sondea
+      # en /api/estado y se recarga sola cuando cambia. Vacio: vale la hora de
+      # arranque, asi que un reinicio ya cuenta como version nueva.
+      PUENTE_VERSION: ${PUENTE_VERSION:-}
       # Los equipos que el boton "Encender" de la consola puede despertar.
       # Vacio: no hay acciones rapidas. Los nombres son claves de
       # /etc/puente/equipos.conf del host; las MAC no entran aqui.
@@ -265,21 +269,10 @@ services:
     ports:
       - "127.0.0.1:${MCP_PORT:-8421}:8000"
     healthcheck:
-      # Un GET a /mcp sin cabeceras de sesion devuelve 406 por diseno del
-      # transporte streamable-http, y urlopen lo lanza como excepcion. Lo que se
-      # mide es que el servidor responde: cualquier codigo por debajo de 500 vale.
-      test:
-        - CMD
-        - python
-        - -c
-        - |
-          import sys, urllib.request, urllib.error
-          try:
-              urllib.request.urlopen("http://127.0.0.1:8000/mcp", timeout=4)
-          except urllib.error.HTTPError as exc:
-              sys.exit(1 if exc.code >= 500 else 0)
-          except Exception:
-              sys.exit(1)
+      # A /healthz y no a /mcp: un GET pelado a /mcp abre una sesion del
+      # transporte, se lleva un 406 y la cierra, y eso son tres lineas de log
+      # cada 30 s por servidor. /healthz no toca las sesiones.
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=4).status == 200 else 1)"]
       interval: 30s
       timeout: 8s
       retries: 5
@@ -316,19 +309,9 @@ services:
     ports:
       - "127.0.0.1:${GOOGLE_MCP_PORT:-8422}:8000"
     healthcheck:
-      # Solo que el servidor responde: la salud de Gmail no es la de este proceso.
-      test:
-        - CMD
-        - python
-        - -c
-        - |
-          import sys, urllib.request, urllib.error
-          try:
-              urllib.request.urlopen("http://127.0.0.1:8000/mcp", timeout=4)
-          except urllib.error.HTTPError as exc:
-              sys.exit(1 if exc.code >= 500 else 0)
-          except Exception:
-              sys.exit(1)
+      # Solo que el servidor responde: la salud de Gmail no es la de este
+      # proceso. A /healthz, que no abre sesion del transporte como /mcp.
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=4).status == 200 else 1)"]
       interval: 30s
       timeout: 8s
       retries: 5

@@ -1,7 +1,18 @@
+import os
+import time
 from zoneinfo import ZoneInfo
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
+
+# Que version del agente esta corriendo. La pone deploy.sh con el SHA corto del
+# commit; la consola la sondea y se recarga sola cuando cambia, porque la tablet
+# de la pared es el unico aparato encendido todo el dia y el unico que nadie va
+# a recargar nunca. Sin PUENTE_VERSION vale la hora de arranque: asi cualquier
+# reinicio cuenta como version nueva, que es de mas y nunca de menos. Un valor
+# fijo por defecto seria peor: la consola no se enteraria jamas.
+VERSION = os.environ.get("PUENTE_VERSION", "").strip() or f"arranque-{int(time.time())}"
 
 
 SYSTEM_PROMPT = """Eres el asistente personal de Edu, corriendo en su homelab.
