@@ -320,7 +320,8 @@ que un job diario vacia el contenido de las filas de mas de 30 dias
   del host **(hecho)**. Falta: eventos de calendario.
 - **F3 — La consola.** Dashboard en la tablet **(hecho: aprobaciones, estado,
   chat, briefing, modo ambient y acciones rapidas con Wake-on-LAN)**. Faltan:
-  Fully Kiosk y Home Assistant.
+  restaurar la ultima conversacion al cargar (ver abajo), Fully Kiosk y
+  Home Assistant.
 - **F4 —** GitHub/PRs, proactividad, voz, 8B local para resumenes de madrugada.
 
 ---
