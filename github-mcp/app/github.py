@@ -179,12 +179,17 @@ async def diff(repo: str, numero: int) -> dict[str, Any]:
     crudo = await _pedir(f"/repos/{repo}/pulls/{numero}", diff=True)
     # Redactar ANTES de truncar: si no, una clave partida por el corte se
     # quedaria a medias y el trozo que entra en el prompt seguiria siendo ella.
-    limpio, tapados = redactar(crudo)
+    limpio, _ = redactar(crudo)
+    visible = limpio[:MAX_DIFF]
     datos: dict[str, Any] = {
         "repo": repo,
         "numero": numero,
-        "diff": limpio[:MAX_DIFF],
-        "secretos_tapados": tapados,
+        "diff": visible,
+        # De lo que se ENSENA, no del diff entero: un "29 secretos tapados"
+        # junto a un trozo donde no se ve ninguno hace que el modelo cuente
+        # cosas que no ha visto. Los que caigan en la parte cortada no son
+        # asunto suyo, y el aviso de truncado ya dice que hay mas.
+        "secretos_tapados": visible.count("[REDACTADO"),
         "aviso": AVISO,
     }
     if len(limpio) > MAX_DIFF:
