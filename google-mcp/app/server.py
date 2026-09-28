@@ -32,7 +32,11 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 log = logging.getLogger("google-mcp")
 # Y su linea de acceso tampoco se escribe: son 2.880 al dia diciendo que el
 # proceso sigue vivo, y entre ellas es donde hay que encontrar lo que importa.
-logging.getLogger("uvicorn.access").addFilter(lambda r: "/healthz" not in r.getMessage())
+# Es un filtro sobre esa UNICA linea, no una bajada de nivel: el trafico MCP de
+# verdad (y sus errores) se sigue viendo entero, que es como se mira que pasa.
+logging.getLogger("uvicorn.access").addFilter(
+    lambda registro: '"GET /healthz HTTP' not in registro.getMessage()
+)
 
 mcp = FastMCP(
     "google",
