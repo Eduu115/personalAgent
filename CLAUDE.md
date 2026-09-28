@@ -322,16 +322,18 @@ que un job diario vacia el contenido de las filas de mas de 30 dias
 ## Degradaciones silenciosas: la regla de los valores por defecto
 
 El 28/9 salieron cuatro seguidas en una noche, y la ultima costo un rato largo:
-`${HELPER_SOCKET:-/dev/null}` monta un character device en
-`/run/puente/helper.sock` cuando falta la linea en el `.env`, y el contenedor le
-habla a eso. El error que sale es `ConnectionRefused`, que manda a mirar
+`${HELPER_SOCKET:-/dev/null}` montaba un character device en
+`/run/puente/helper.sock` cuando faltaba la linea en el `.env`, y el contenedor
+le hablaba a eso. El error que salia era `ConnectionRefused`, que manda a mirar
 permisos y grupos que estaban bien.
 
 **Un valor por defecto solo vale si es el valor correcto, o si deja la capacidad
 visiblemente apagada.** Un default que la deja encendida apuntando a la nada no
 es un default: es un fallo aplazado hasta el peor momento. Cuando no se pueda
 tener ninguna de las dos cosas, el compose usa `${VAR:?mensaje}` (como
-`DOCKER_GID`) o `deploy.sh` lo comprueba antes de construir nada.
+`DOCKER_GID`) o `deploy.sh` lo comprueba antes de construir nada. Y antes de
+anadir una comprobacion, mirar si el default puede pasar a ser el valor
+correcto: eso es lo que paso con `HELPER_SOCKET`, y sale mas barato.
 
 Lo que hay hoy, repasado entero:
 
@@ -344,8 +346,8 @@ Lo que hay hoy, repasado entero:
 
 | Dejaban un estado roto-pero-configurado | Ahora |
 |---|---|
-| `HELPER_SOCKET:-/dev/null` | `deploy.sh` aborta si hay socket en el host y falta la linea, y dice cual es |
-| `HELPER_GID:-10002` | igual, y ademas compara con el gid real de `puente-helper` |
+| `HELPER_SOCKET:-/dev/null` | **ya no existe**: los contenedores montan `${HELPER_DIR:-/run/puente}`, y ese default si es el valor correcto. Cambiar el default fue el arreglo; no hizo falta comprobar nada |
+| `HELPER_GID:-10002` | sigue siendo un gid inventado y no hay valor correcto posible, asi que lo comprueba `deploy.sh`: aborta si existe el grupo `puente-helper` y la linea falta o no cuadra con su gid |
 | `GMAIL_USUARIO`, `GMAIL_APP_PASSWORD`, `GOOGLE_ICAL_URLS` vacias | google-mcp anuncia `mail_*` y `cal_agenda` **siempre**: sin credenciales estan ahi y fallan al llamarlas. `deploy.sh` exige las tres |
 
 Los secretos (`POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `LITELLM_MASTER_KEY`, los
