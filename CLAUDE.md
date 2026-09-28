@@ -319,6 +319,47 @@ que un job diario vacia el contenido de las filas de mas de 30 dias
 
 ---
 
+## Degradaciones silenciosas: la regla de los valores por defecto
+
+El 28/9 salieron cuatro seguidas en una noche, y la ultima costo un rato largo:
+`${HELPER_SOCKET:-/dev/null}` monta un character device en
+`/run/puente/helper.sock` cuando falta la linea en el `.env`, y el contenedor le
+habla a eso. El error que sale es `ConnectionRefused`, que manda a mirar
+permisos y grupos que estaban bien.
+
+**Un valor por defecto solo vale si es el valor correcto, o si deja la capacidad
+visiblemente apagada.** Un default que la deja encendida apuntando a la nada no
+es un default: es un fallo aplazado hasta el peor momento. Cuando no se pueda
+tener ninguna de las dos cosas, el compose usa `${VAR:?mensaje}` (como
+`DOCKER_GID`) o `deploy.sh` lo comprueba antes de construir nada.
+
+Lo que hay hoy, repasado entero:
+
+| Apagan limpio | Por que se ve |
+|---|---|
+| `STACKS_ACTUALIZABLES` vacia | `lab_update_stack` no se registra: no sale en `tools/list` ni en `/readyz` |
+| `EQUIPOS_DESPERTABLES` vacia | el catalogo de acciones queda vacio y la consola lo dice |
+| `GMAIL_USUARIO` vacia **en el agente** | el prompt dice que pregunte la direccion |
+| `BRIEFING_CRON` vacia | el log dice "briefing apagado" al arrancar |
+
+| Dejaban un estado roto-pero-configurado | Ahora |
+|---|---|
+| `HELPER_SOCKET:-/dev/null` | `deploy.sh` aborta si hay socket en el host y falta la linea, y dice cual es |
+| `HELPER_GID:-10002` | igual, y ademas compara con el gid real de `puente-helper` |
+| `GMAIL_USUARIO`, `GMAIL_APP_PASSWORD`, `GOOGLE_ICAL_URLS` vacias | google-mcp anuncia `mail_*` y `cal_agenda` **siempre**: sin credenciales estan ahi y fallan al llamarlas. `deploy.sh` exige las tres |
+
+Los secretos (`POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `LITELLM_MASTER_KEY`, los
+tokens de ntfy, las URLs base) ya los exigia `deploy.sh` con su formato. El
+resto de defaults del compose son el valor correcto (puertos, modelos,
+`LOG_LEVEL`, `ZONA_HORARIA`, `DUENO`) y los de `config.py` solo se usan si
+alguien corre el agente fuera del compose.
+
+Nota sobre google-mcp: se deja anunciando las herramientas aunque falten las
+credenciales, y no se cambia a registro condicional como `lab_update_stack`. Si
+desaparecieran, el briefing no las llamaria y no diria nada del correo, que es
+peor: fallando, `_AREA_DE_HERRAMIENTA` lo convierte en un "no he podido
+consultar el correo" arriba del briefing. La barrera va en el despliegue.
+
 ## Deuda conocida
 
 - **`redact.py` esta duplicado** en `homelab-mcp/app/` y `google-mcp/app/`, a
@@ -547,6 +588,9 @@ los escribiria en el disco del navegador.
 - Toda funcion que toque el mundo exterior es `async`.
 - Secretos solo por variable de entorno, nunca en el codigo ni en el compose.
 - Cada servicio nuevo en el compose nace con `mem_limit` y `healthcheck`. Sin excepcion.
+- Un valor por defecto es el valor correcto o deja la capacidad visiblemente
+  apagada. Nunca un estado roto que parece configurado: ver "Degradaciones
+  silenciosas".
 - Antes de anadir un servicio, mira su RSS en reposo. En una maquina de 16 GB, un
   componente elegido por su README y no por lo que consume te cuesta media arquitectura.
 

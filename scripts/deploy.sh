@@ -54,6 +54,44 @@ for h in NTFY_PASS_HASH_PUENTE NTFY_PASS_HASH_EDU; do
         || fallo "$h vacio o sin comillas simples en .env: $h='\$2a\$10\$...' (docker run --rm -it binwiederhier/ntfy:v2.28.0 user hash)"
 done
 
+# Un valor por defecto que APAGA una capacidad esta bien; uno que la deja
+# encendida apuntando a la nada, no. El compose tiene
+# ${HELPER_SOCKET:-/dev/null}, que existe para que no falle en un portatil sin
+# helper; con el helper instalado y la linea ausente del .env, lo que monta es
+# un character device en /run/puente/helper.sock y el contenedor le habla a eso.
+# Sale como ConnectionRefused, que no dice nada de la causa. Paso el 28/9.
+SOCKET_DEL_HELPER="$(sed -n 's/^HELPER_SOCKET=//p' .env)"
+if [ -z "$SOCKET_DEL_HELPER" ] && [ -S /run/puente/helper.sock ]; then
+    fallo "el helper esta instalado (hay un socket en /run/puente/helper.sock) pero falta HELPER_SOCKET en el .env: el compose montaria /dev/null encima y los contenedores hablarian con un character device. Anade esta linea:
+  HELPER_SOCKET=/run/puente/helper.sock"
+fi
+if [ -n "$SOCKET_DEL_HELPER" ] && [ -e "$SOCKET_DEL_HELPER" ] && [ ! -S "$SOCKET_DEL_HELPER" ]; then
+    fallo "HELPER_SOCKET apunta a $SOCKET_DEL_HELPER, que existe y NO es un socket ($(stat -Lc '%F' "$SOCKET_DEL_HELPER")): el contenedor le hablaria a eso"
+fi
+
+# Lo mismo por el otro lado: el group_add tiene ${HELPER_GID:-10002}, un gid
+# inventado. Con el helper instalado y HELPER_GID ausente o desfasado, el socket
+# se monta perfecto y el contenedor se lleva un EACCES al abrirlo.
+if getent group puente-helper >/dev/null 2>&1; then
+    gid_helper="$(getent group puente-helper | cut -d: -f3)"
+    GID_EN_ENV="$(sed -n 's/^HELPER_GID=//p' .env)"
+    if [ -z "$GID_EN_ENV" ]; then
+        fallo "existe el grupo puente-helper (gid $gid_helper) pero falta HELPER_GID en el .env: los contenedores entrarian en el grupo 10002, que no es ese, y no podrian abrir el socket. Anade esta linea:
+  HELPER_GID=$gid_helper"
+    elif [ "$GID_EN_ENV" != "$gid_helper" ]; then
+        fallo "HELPER_GID del .env es $GID_EN_ENV y el grupo puente-helper es $gid_helper: los contenedores no podrian abrir el socket"
+    fi
+fi
+
+# google-mcp registra mail_* y cal_agenda SIEMPRE, aunque no haya credenciales.
+# Un .env sin ellas no deja la capacidad apagada: la deja anunciada al modelo y
+# fallando en cada llamada. Si de verdad quieres el agente sin Google, quita el
+# servicio del compose, que eso si se ve.
+for credencial in GMAIL_USUARIO GMAIL_APP_PASSWORD GOOGLE_ICAL_URLS; do
+    grep -qE "^$credencial=.+" .env \
+        || fallo "$credencial vacia en .env: google-mcp anuncia igual sus herramientas y fallan al llamarlas ('sin configurar'). Rellenala, o quita google-mcp del compose si lo quieres apagado de verdad"
+done
+
 # En el server no se edita a mano: lo que no esta en git no existe.
 if ! git diff --quiet || ! git diff --cached --quiet; then
     fallo "hay cambios locales sin commitear en el server"
@@ -364,15 +402,48 @@ else
     # Que el socket se vea desde fuera no dice que se vea desde DENTRO, que es
     # lo que importa: los dos contenedores llegan por group_add y por el bind
     # mount. Sin esto, el fallo aparece el dia que pulsas el boton.
+    #
+    # Primero un stat y luego el connect: si lo que hay montado ahi no es un
+    # socket, el connect da un errno que manda a mirar permisos que estan bien.
     for servicio in homelab-mcp agent; do
-        docker compose exec -T "$servicio" python - <<'SOCK' || fallo "$servicio no alcanza el helper en /run/puente/helper.sock (el motivo, arriba): mira el modo de /run/puente y el HELPER_GID del .env"
-import socket, sys
+        docker compose exec -T "$servicio" python - <<'SOCK' || fallo "$servicio no alcanza el helper en /run/puente/helper.sock (el motivo y donde mirar, justo encima)"
+import os
+import socket
+import stat
+import sys
+
+RUTA = "/run/puente/helper.sock"
+QUE_ES = {
+    stat.S_ISCHR: "un character device (casi seguro /dev/null: falta HELPER_SOCKET en el .env)",
+    stat.S_ISDIR: "un directorio",
+    stat.S_ISREG: "un fichero normal",
+    stat.S_ISFIFO: "una tuberia",
+    stat.S_ISBLK: "un dispositivo de bloques",
+}
+try:
+    modo = os.stat(RUTA).st_mode
+except FileNotFoundError:
+    sys.exit(f"  no existe {RUTA} dentro del contenedor: el helper no esta corriendo, o "
+             f"HELPER_SOCKET del .env apunta a otro sitio")
+except PermissionError as exc:
+    sys.exit(f"  no se puede ni mirar {RUTA}: {exc}. Modo de /run/puente en el host")
+if not stat.S_ISSOCK(modo):
+    if hay := [texto for comprueba, texto in QUE_ES.items() if comprueba(modo)]:
+        sys.exit(f"  lo montado en {RUTA} es {hay[0]}, no un socket")
+    sys.exit(f"  lo montado en {RUTA} no es un socket (modo {stat.filemode(modo)})")
 
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 s.settimeout(10)
 try:
-    s.connect("/run/puente/helper.sock")
-except Exception as exc:
+    s.connect(RUTA)
+except PermissionError:
+    sys.exit(f"  sin permiso para usar {RUTA}: es root:puente-helper 0660 y este contenedor "
+             f"esta en los grupos {os.getgroups()}. Revisa HELPER_GID en el .env "
+             f"(getent group puente-helper | cut -d: -f3)")
+except ConnectionRefusedError:
+    sys.exit(f"  {RUTA} es un socket y no escucha nadie: el helper esta parado "
+             f"(systemctl status puente-helper)")
+except OSError as exc:
     sys.exit(f"  {type(exc).__name__}: {exc}")
 s.sendall(b'{"op":"ping"}\n')
 print("  " + s.makefile().readline().strip()[:90])
