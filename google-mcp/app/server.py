@@ -18,6 +18,8 @@ import logging
 import os
 
 from mcp.server.fastmcp import FastMCP
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from . import calendario, correo
 
@@ -28,6 +30,9 @@ logging.basicConfig(
 # httpx escribe en INFO cada URL que pide, y la del calendario es un secreto.
 logging.getLogger("httpx").setLevel(logging.WARNING)
 log = logging.getLogger("google-mcp")
+# Y su linea de acceso tampoco se escribe: son 2.880 al dia diciendo que el
+# proceso sigue vivo, y entre ellas es donde hay que encontrar lo que importa.
+logging.getLogger("uvicorn.access").addFilter(lambda r: "/healthz" not in r.getMessage())
 
 mcp = FastMCP(
     "google",
@@ -35,6 +40,16 @@ mcp = FastMCP(
     port=8000,
     streamable_http_path="/mcp",
 )
+
+
+# El healthcheck del compose pega aqui y no a /mcp. Un GET pelado a /mcp abre
+# una sesion del transporte, la rechaza con un 406 y la cierra: tres lineas de
+# log cada 30 s y una sesion creada y destruida para nada. Esto no toca la
+# maquinaria de sesiones. No mira nada de fuera a proposito: lo que se pregunta
+# es si ESTE proceso responde, no si Gmail esta de buenas.
+@mcp.custom_route("/healthz", methods=["GET"])
+async def healthz(_peticion: Request) -> JSONResponse:
+    return JSONResponse({"status": "ok"})
 
 
 @mcp.tool()

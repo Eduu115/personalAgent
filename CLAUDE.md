@@ -167,6 +167,12 @@ blanca por ruta (`config/haproxy.cfg`), solo GET y solo seis endpoints de lectur
 en una red `internal: true` que no tiene salida. `/containers/{id}/json`, que
 devuelve las variables de entorno de todos los contenedores, da 403.
 
+Los dos servidores MCP tienen su propio `/healthz`, y ahi pega el healthcheck
+del compose. A `/mcp` no: un GET pelado abre una sesion del transporte, se
+lleva un 406 y la cierra, o sea tres lineas de log y una sesion creada y
+destruida cada 30 s por servidor. Su linea de acceso tampoco se escribe: eran
+2.880 al dia por servidor diciendo que el proceso sigue vivo.
+
 `lab_logs` redacta secretos antes de devolver nada (`app/redact.py`) y marca su
 salida como contenido no confiable, que es la regla 2 aplicada donde toca.
 
@@ -366,9 +372,13 @@ consultar el correo" arriba del briefing. La barrera va en el despliegue.
 
 - **`redact.py` esta duplicado** en `homelab-mcp/app/` y `google-mcp/app/`, a
   proposito: 40 lineas son mas baratas que compartir contexto de build entre dos
-  servidores. Las dos copias lo dicen en su cabecera. Si cambias una, cambia la
-  otra. Si llega un tercer servidor que lo necesite, toca paquete comun.
-  `python -m app.redact` comprueba cada copia.
+  servidores. Si llega un tercer servidor que lo necesite, toca paquete comun.
+  `python -m app.redact` comprueba cada copia, y **`deploy.sh` las compara con
+  `cmp`**: mientras algo verifique que son identicas byte a byte, la duplicacion
+  es contabilidad; sin eso son dos versiones de la misma barrera de seguridad, y
+  ya paso una vez que una tenia un fallo que la otra no. El dia que se puso la
+  comprobacion ya diferian (en la linea del comentario que nombraba a la otra
+  copia), asi que ahora esa linea tambien es identica en las dos.
 
 ---
 
@@ -598,6 +608,17 @@ habia cerrado con `done` antes de la aprobacion, asi que sin esto el unico canal
 para enterarse seria el push al movil, y delante de la pantalla te quedabas sin
 saber si paso algo. Nada de websockets por ahora: sondear dos veces por segundo
 durante dos minutos es mas barato que una capa de tiempo real.
+
+**La consola se recarga sola cuando hay codigo nuevo.** La tablet de la pared
+es el unico aparato encendido todo el dia y el unico que nadie va a recargar:
+sin esto se queda con la version del dia que la colgaste. `/api/estado` lleva
+la version desplegada (el SHA corto que pone `deploy.sh`, o la hora de arranque
+si no esta puesta), la pagina guarda la que vio al cargar y se recarga cuando
+cambia. No hay endpoint nuevo: ese ya se sondea cada 15 s. Antes de recargar le
+pide al service worker que tome el control, que si no la pagina vuelve a
+cargarse contra el viejo. Y no recarga encima de algo a medias: un turno de
+chat en curso, una aprobacion ejecutandose o una conversacion a la vista lo
+aplazan al siguiente sondeo. En ambient no, ahi no hay nadie tecleando.
 
 El service worker existe solo para que sea instalable y no cachea nada: ademas
 de la frescura, `/api/aprobaciones` devuelve nonces de un solo uso y cachearlos
