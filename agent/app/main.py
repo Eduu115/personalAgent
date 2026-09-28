@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import aprobaciones, briefing, db, herramientas, mcp_client
+from . import aprobaciones, briefing, db, herramientas, mcp_client, vigilancia
 from .config import settings
 from .routes.aprobaciones import router as aprobaciones_router
 from .routes.chat import router as chat_router
@@ -53,6 +53,12 @@ async def lifespan(app: FastAPI):
     planificador.add_job(
         aprobaciones.caducar, "interval", minutes=1, id="caducar-aprobaciones",
         max_instances=1, coalesce=True, misfire_grace_time=120,
+    )
+    # Proactividad. Avisa de transiciones, nunca de estados, y no arregla nada:
+    # todo lo que mira va por el atajo de solo lectura.
+    planificador.add_job(
+        vigilancia.vigilar, "interval", minutes=settings.vigilancia_minutos,
+        id="vigilancia", max_instances=1, coalesce=True, misfire_grace_time=120,
     )
     # El audit log no se borra (hay un trigger que lo impide): se le vacia el
     # contenido a lo viejo y se queda la metadata.
@@ -141,6 +147,16 @@ async def briefing_ahora():
     aviso por ntfy.
     """
     return await briefing.lanzar()
+
+@app.post("/api/vigilancia")
+async def vigilancia_ahora():
+    """Una pasada de la vigilancia ya, sin esperar al job. Para probarla.
+
+    Avisa solo si algo CAMBIA de estado y lleva confirmandose: llamarla dos
+    veces seguidas no manda dos avisos, que es justamente el objetivo.
+    """
+    return await vigilancia.vigilar()
+
 
 # La consola, al final: JS plano servido tal cual, sin build ni Node. Va montada
 # en la raiz, asi que se registra DESPUES de las rutas de la API.

@@ -224,6 +224,53 @@ async def ultimos_briefings(cuantos: int) -> list[dict[str, Any]]:
             return list(reversed(await cur.fetchall()))
 
 
+# ------------------------------------------------------------------ vigilancias
+
+
+async def vigilancias() -> dict[str, dict[str, Any]]:
+    """El estado anterior de cada vigilancia, por nombre."""
+    async with pool().connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT * FROM vigilancias")
+            return {f["nombre"]: dict(f) for f in await cur.fetchall()}
+
+
+async def vigilancia_guardar(
+    nombre: str, estado: str, candidato: str | None, racha: int, detalle: str, cambia: bool
+) -> None:
+    """Guarda el estado. `desde` solo se mueve cuando hay transicion de verdad.
+
+    Si se moviera en cada comprobacion, el aviso no podria decir "lleva tres
+    horas asi", que es la mitad de lo que hace falta para decidir que hacer.
+    """
+    async with pool().connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                """
+                INSERT INTO vigilancias (nombre, estado, candidato, racha, detalle, desde, visto_en)
+                VALUES (%s, %s, %s, %s, %s, now(), now())
+                ON CONFLICT (nombre) DO UPDATE SET
+                    estado = EXCLUDED.estado,
+                    candidato = EXCLUDED.candidato,
+                    racha = EXCLUDED.racha,
+                    detalle = EXCLUDED.detalle,
+                    visto_en = now(),
+                    desde = CASE WHEN %s THEN now() ELSE vigilancias.desde END
+                """,
+                (nombre, estado, candidato, racha, detalle, cambia),
+            )
+
+
+async def vigilancia_olvidar(nombre: str) -> None:
+    """Deja de vigilar algo que ya no existe (un contenedor que se ha quitado).
+
+    Sin aviso: quitar un contenedor a proposito no es una incidencia.
+    """
+    async with pool().connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("DELETE FROM vigilancias WHERE nombre = %s", (nombre,))
+
+
 async def hechos_vigentes() -> list[dict[str, Any]]:
     """Los hechos que siguen valiendo: vigentes y sin caducar."""
     async with pool().connection() as conn:

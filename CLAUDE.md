@@ -323,8 +323,8 @@ que un job diario vacia el contenido de las filas de mas de 30 dias
   restaurar la ultima conversacion al cargar (ver abajo), Fully Kiosk y
   Home Assistant.
 - **F4 —** GitHub/PRs **(hecho: github-mcp, tres herramientas de lectura y las
-  PRs que reclaman algo en el briefing)**, proactividad, voz, 8B local para
-  resumenes de madrugada.
+  PRs que reclaman algo en el briefing)**, proactividad **(hecha: ver abajo)**,
+  voz, 8B local para resumenes de madrugada.
 
 ---
 
@@ -460,6 +460,54 @@ degradacion silenciosa de la que ya llevamos demasiadas.
 paso a `comun/redact.py`, que los Dockerfiles meten con `COPY --from=comun`
 (`additional_contexts` del compose). `deploy.sh` comprueba que no reaparece
 ninguna copia suelta.
+
+## Proactividad (F4): transiciones, no estados
+
+`agent/app/vigilancia.py`, un job cada 5 minutos. **Se avisa de que algo CAMBIA
+de bien a mal, y de que vuelve. Mientras sigue mal, silencio.** Un sistema que
+avisa mas de una vez al dia de media acaba silenciado, y un canal silenciado es
+peor que no tenerlo: crees que te avisaria y ya no lo hace. Ante la duda, calla.
+
+Para que haya transiciones y no umbrales repetidos hace falta el estado
+anterior, y vive en Postgres (tabla `vigilancias`, migracion 004). Sobrevive a
+los despliegues a proposito: si el disco ya estaba mal ayer, reiniciar el agente
+no es motivo para volver a avisar.
+
+Dos frenos, y hacen falta los dos:
+
+- **Histeresis por repeticion**: un cambio no cuenta hasta verlo 3 veces
+  seguidas (15 min con el job cada 5). Un pico de CPU de treinta segundos no es
+  una incidencia.
+- **Umbrales distintos de subida y de bajada**: 85% para avisar, 80% para dar
+  por recuperado. Con un solo umbral, algo que oscila alrededor del limite manda
+  un aviso por oscilacion.
+
+Se vigilan: RAM y disco del anfitrion, cada contenedor por su nombre (unhealthy
+o en bucle de reinicio), el helper del host, que el briefing de las 7:30 haya
+salido, la caducidad del token de GitHub y **el presupuesto de LiteLLM al 80% y
+al 95%**. Ese ultimo es la degradacion silenciosa que estaba esperando: cuando
+se agota el tope, el agente deja de responder y no dice por que.
+
+**Topic propio en ntfy, `avisos`, y no `aprobaciones`.** Las aprobaciones son lo
+unico que no se puede permitir silenciar; compartiendo canal, el dia que te
+hartes de los avisos silencias tambien los botones. `deploy.sh` comprueba que la
+ACL tiene los dos y que no son el mismo.
+
+**No arregla nada, y no puede.** Todo lo que mira va por
+`herramientas.solo_lectura()`, el mismo atajo que usa la consola, que revienta
+con cualquier cosa que no sea nivel `read`. Detectar y avisar; el dia que quiera
+arreglar algo, por la cola de aprobaciones como todo lo demas.
+`pruebas.vigilancia_no_escribe()` lo comprueba.
+
+La parte que decide (`decidir()`) es una funcion pura y por eso se puede probar
+de verdad: `pruebas.transiciones_de_vigilancia()` pasa secuencias inventadas y
+comprueba que avisa a la tercera, que **calla 200 comprobaciones seguidas** con
+algo roto, que un pico no cuenta y que la banda entre umbrales no mueve nada.
+
+Un detalle que costo encontrar: **el nombre de una vigilancia no puede llevar su
+umbral dentro**. `presupuesto:80` se renombra a `presupuesto:3` si cambias el
+aviso, la fila vieja se queda en "mal" para siempre y la recuperacion no llega
+nunca. Van por etiqueta (`presupuesto:aviso`), no por valor.
 
 ## Deuda conocida
 

@@ -411,8 +411,11 @@ services:
       # alguna vez se escriben aqui directamente, cada $ va doble ($$).
       NTFY_AUTH_USERS: "puente:${NTFY_PASS_HASH_PUENTE:?define NTFY_PASS_HASH_PUENTE en .env (ver .env.example)}:user,edu:${NTFY_PASS_HASH_EDU:?define NTFY_PASS_HASH_EDU en .env (ver .env.example)}:user"
       # briefing: el aviso de cada manana. aprobaciones: los botones de las
-      # escrituras. puente solo escribe, edu solo lee, en los dos.
-      NTFY_AUTH_ACCESS: "puente:briefing:wo,puente:aprobaciones:wo,edu:briefing:ro,edu:aprobaciones:ro"
+      # escrituras. avisos: la vigilancia. puente solo escribe, edu solo lee.
+      # avisos va aparte de aprobaciones a proposito: las aprobaciones son lo
+      # unico que no se puede permitir silenciar, y con un canal compartido, el
+      # dia que te hartes de los avisos silencias tambien los botones.
+      NTFY_AUTH_ACCESS: "puente:briefing:wo,puente:aprobaciones:wo,puente:avisos:wo,edu:briefing:ro,edu:aprobaciones:ro,edu:avisos:ro"
       NTFY_AUTH_TOKENS: "puente:${NTFY_TOKEN_PUBLICAR:?define NTFY_TOKEN_PUBLICAR en .env (ver .env.example)}:agente,edu:${NTFY_TOKEN_SUSCRIBIR:?define NTFY_TOKEN_SUSCRIBIR en .env (ver .env.example)}:movil"
     read_only: true
     tmpfs:
