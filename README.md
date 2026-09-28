@@ -267,6 +267,12 @@ la pantalla de inicio". El service worker esta solo para que se pueda instalar;
 **no cachea nada**, a proposito: una cola de aprobaciones de hace media hora es
 peor que no verla.
 
+**Se recarga sola al desplegar**: `/api/estado` lleva la version que esta
+corriendo, y la pagina se recarga cuando cambia. Es para la tablet de la pared,
+que nadie va a recargar nunca. Si estas escribiendo en el chat, tienes una
+aprobacion ejecutandose o una conversacion a la vista, espera al siguiente
+sondeo en vez de pisarte.
+
 Cuatro endpoints la alimentan, todos de solo lectura:
 
 ```bash

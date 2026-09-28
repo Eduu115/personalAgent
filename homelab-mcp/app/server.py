@@ -16,6 +16,8 @@ import os
 from typing import Literal
 
 from mcp.server.fastmcp import FastMCP
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from . import docker_api, helper, host
 
@@ -24,6 +26,9 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)-7s %(name)s :: %(message)s",
 )
 log = logging.getLogger("homelab-mcp")
+# Y su linea de acceso tampoco se escribe: son 2.880 al dia diciendo que el
+# proceso sigue vivo, y entre ellas es donde hay que encontrar lo que importa.
+logging.getLogger("uvicorn.access").addFilter(lambda r: "/healthz" not in r.getMessage())
 
 mcp = FastMCP(
     "homelab",
@@ -89,6 +94,16 @@ async def lab_logs(contenedor: str, lineas: int = 100) -> dict:
 
 # Los stacks que el helper del host acepta actualizar. Si no hay ninguno
 # configurado, la herramienta ni se registra: no existe para el modelo.
+# El healthcheck del compose pega aqui y no a /mcp. Un GET pelado a /mcp abre
+# una sesion del transporte, la rechaza con un 406 y la cierra: tres lineas de
+# log cada 30 s y una sesion creada y destruida para nada. Esto no toca la
+# maquinaria de sesiones. No mira nada de fuera a proposito: lo que se pregunta
+# es si ESTE proceso responde, no si Docker esta de buenas.
+@mcp.custom_route("/healthz", methods=["GET"])
+async def healthz(_peticion: Request) -> JSONResponse:
+    return JSONResponse({"status": "ok"})
+
+
 STACKS = tuple(s.strip() for s in os.environ.get("STACKS_ACTUALIZABLES", "").split(",") if s.strip())
 
 

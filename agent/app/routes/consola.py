@@ -26,7 +26,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 from .. import acciones, aprobaciones, db, herramientas, mcp_client
-from ..config import settings
+from ..config import VERSION, settings
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["consola"])
@@ -117,12 +117,21 @@ async def _estado() -> dict[str, Any]:
 
 @router.get("/estado")
 async def estado():
-    """Contenedores y anfitrion, directo del MCP. Sin modelo por medio."""
+    """Contenedores y anfitrion, directo del MCP. Sin modelo por medio.
+
+    Lleva tambien la version desplegada: la consola ya sondea esto cada 15 s, y
+    con eso se entera de que hay codigo nuevo sin un endpoint mas. Va fuera de
+    la cache y tambien en el error, que un MCP caido no puede dejar a la tablet
+    con la version de hace tres semanas.
+    """
     try:
-        return await _cacheado("estado", _TTL_ESTADO, _estado)
+        datos = await _cacheado("estado", _TTL_ESTADO, _estado)
     except Exception as exc:
         log.warning("no se pudo leer el estado para la consola: %s", exc)
-        return JSONResponse({"error": str(exc) or type(exc).__name__}, status_code=503)
+        return JSONResponse(
+            {"error": str(exc) or type(exc).__name__, "version": VERSION}, status_code=503
+        )
+    return datos | {"version": VERSION}
 
 
 async def _agenda() -> dict[str, Any]:

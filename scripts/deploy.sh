@@ -93,10 +93,33 @@ for credencial in GMAIL_USUARIO GMAIL_APP_PASSWORD GOOGLE_ICAL_URLS; do
         || fallo "$credencial vacia en .env: google-mcp anuncia igual sus herramientas y fallan al llamarlas ('sin configurar'). Rellenala, o quita google-mcp del compose si lo quieres apagado de verdad"
 done
 
+# redact.py vive duplicado en los dos MCP a proposito (40 lineas son mas baratas
+# que compartir contexto de build), pero son las reglas de redaccion de
+# secretos: codigo de seguridad. Ya paso una vez que una copia tenia un fallo
+# que la otra no. Mientras algo compruebe que son identicas, la duplicacion es
+# contabilidad; sin eso, es que hay dos versiones de la misma barrera.
+cmp -s homelab-mcp/app/redact.py google-mcp/app/redact.py \
+    || fallo "las dos copias de redact.py han divergido: son las reglas que tapan los secretos antes de que salgan de un MCP, y una copia con un fallo que la otra no tiene es justo como se escapa uno. Miralo con: diff homelab-mcp/app/redact.py google-mcp/app/redact.py"
+
+# Redis avisa en cada arranque: sin esto, un guardado en segundo plano puede
+# fallar si el sistema esta justo de memoria. Es configuracion del HOST y este
+# script no la toca, pero callarselo es como no tenerlo.
+if [ "$(cat /proc/sys/vm/overcommit_memory 2>/dev/null)" != "1" ]; then
+    echo "AVISO: vm.overcommit_memory no esta en 1, y Redis lo pide para que un BGSAVE no falle con la memoria justa. Anadelo al host:
+  echo 'vm.overcommit_memory = 1' | sudo tee -a /etc/sysctl.d/99-swappiness.conf
+  sudo sysctl -p /etc/sysctl.d/99-swappiness.conf"
+fi
+
 # En el server no se edita a mano: lo que no esta en git no existe.
 if ! git diff --quiet || ! git diff --cached --quiet; then
     fallo "hay cambios locales sin commitear en el server"
 fi
+
+# Lo que va a estar corriendo, para que la consola sepa cuando se ha quedado
+# vieja. El arbol esta limpio (acaba de comprobarse), asi que el SHA identifica
+# el codigo exactamente. Exportada: la ven todos los `docker compose` de aqui.
+export PUENTE_VERSION="$(git rev-parse --short HEAD)"
+echo "version desplegada: $PUENTE_VERSION"
 
 # sed y no grep | cut: si la variable no esta, grep sale con 1 y con set -e y
 # pipefail el script muere en silencio, sin llegar al valor por defecto.
