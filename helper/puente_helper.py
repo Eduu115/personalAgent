@@ -6,14 +6,20 @@ socket de Docker, que es equivalente a root. Por eso es pequeno, sin
 dependencias y se lee de una sentada. Si crece, algo se ha hecho mal.
 
 Habla JSON por lineas en un socket unix. No hay puerto ni token: el permiso es
-el dueno y el modo del socket. Una sola operacion util, `actualizar`, y el stack
-es una CLAVE de /etc/puente/stacks.conf (root, 600, fuera del repo). Nunca una
-ruta, ni un comando, ni un fichero compose.
+el dueno y el modo del socket. Dos operaciones utiles y las dos van por CLAVE de
+un fichero del host (root, 600, fuera del repo), nunca por parametro libre:
+
+  actualizar(stack)   clave de /etc/puente/stacks.conf  -> compose pull + up -d
+  despertar(equipo)   clave de /etc/puente/equipos.conf -> paquete magico a la LAN
+
+Nunca una ruta, ni un comando, ni un fichero compose, ni una MAC suelta.
 """
 
 import json
 import logging
 import os
+import pwd
+import socket
 import socketserver
 import subprocess
 import time
@@ -32,6 +38,14 @@ import time
 EXCLUIDOS = {"apiarena", "puente", "nextcloud"}
 
 CONFIG = os.environ.get("PUENTE_STACKS", "/etc/puente/stacks.conf")
+EQUIPOS = os.environ.get("PUENTE_EQUIPOS", "/etc/puente/equipos.conf")
+# La broadcast de la LAN. La limitada vale en cualquier red sin saber la mascara;
+# si algun dia hace falta la dirigida (192.168.1.255), se cambia aqui.
+BROADCAST = os.environ.get("PUENTE_BROADCAST", "255.255.255.255")
+# El 9 es el de toda la vida; alguna BIOS escucha en el 7.
+PUERTO_WOL = int(os.environ.get("PUENTE_PUERTO_WOL", "9"))
+# Quien manda el paquete: no hace falta root para un UDP a broadcast.
+SIN_PRIVILEGIOS = os.environ.get("PUENTE_USUARIO_WOL", "nobody")
 SOCKET = os.environ.get("PUENTE_SOCKET", "/run/puente/helper.sock")
 GRUPO = int(os.environ.get("PUENTE_GRUPO_GID", "0"))
 ESPERA_SALUD = 90       # s esperando a que los healthchecks pasen a healthy
@@ -42,16 +56,23 @@ TOPE_TOTAL = 600
 log = logging.getLogger("puente-helper")
 
 
-def stacks() -> dict[str, str]:
-    """nombre=/ruta por linea. Se relee en cada peticion: sin estado que refrescar."""
-    mapa = {}
-    with open(CONFIG) as f:
-        for linea in f:
-            linea = linea.strip()
-            if linea and not linea.startswith("#") and "=" in linea:
-                nombre, ruta = linea.split("=", 1)
-                mapa[nombre.strip()] = ruta.strip()
-    return mapa
+def mapa(fichero: str) -> dict[str, str]:
+    """clave=valor por linea. Se relee en cada peticion: sin estado que refrescar.
+
+    Si el fichero no existe, no hay nada configurado; quien pregunte se llevara
+    un "no esta configurado. Hay: ninguno", que se entiende mejor que un traceback.
+    """
+    salida = {}
+    try:
+        with open(fichero) as f:
+            for linea in f:
+                linea = linea.strip()
+                if linea and not linea.startswith("#") and "=" in linea:
+                    clave, valor = linea.split("=", 1)
+                    salida[clave.strip()] = valor.strip()
+    except FileNotFoundError:
+        log.warning("no existe %s: no hay nada configurado ahi", fichero)
+    return salida
 
 
 def compose(ruta: str, *args: str, tope: int) -> subprocess.CompletedProcess:
@@ -109,11 +130,11 @@ def actualizar(stack: str) -> dict:
     if stack in EXCLUIDOS:
         log.warning("rechazado: '%s' esta excluido en el codigo", stack)
         return {"ok": False, "error": f"'{stack}' no se actualiza desde aqui nunca"}
-    mapa = stacks()
-    ruta = mapa.get(stack)
+    configurados = mapa(CONFIG)
+    ruta = configurados.get(stack)
     if ruta is None:
         log.warning("rechazado: '%s' no esta en %s", stack, CONFIG)
-        return {"ok": False, "error": f"'{stack}' no esta configurado. Hay: {', '.join(sorted(mapa)) or 'ninguno'}"}
+        return {"ok": False, "error": f"'{stack}' no esta configurado. Hay: {', '.join(sorted(configurados)) or 'ninguno'}"}
     if os.path.basename(os.path.realpath(ruta)) in EXCLUIDOS:
         log.warning("rechazado: '%s' apunta a un directorio excluido", stack)
         return {"ok": False, "error": f"'{stack}' apunta a un stack excluido"}
@@ -159,6 +180,80 @@ def actualizar(stack: str) -> dict:
     }
 
 
+# ------------------------------------------------------------------ despertar
+
+
+def paquete(mac: str) -> bytes:
+    """El paquete magico: seis 0xFF y la MAC dieciseis veces. Eso es todo."""
+    limpio = "".join(c for c in mac if c in "0123456789abcdefABCDEF")
+    if len(limpio) != 12:
+        raise ValueError("la MAC configurada no tiene 12 digitos hexadecimales")
+    return b"\xff" * 6 + bytes.fromhex(limpio) * 16
+
+
+def _enviar(datos: bytes) -> None:
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        for _ in range(3):   # UDP y sin acuse: tres copias por si se pierde una
+            s.sendto(datos, (BROADCAST, PUERTO_WOL))
+
+
+def sin_root(hacer) -> None:
+    """Corre algo en un hijo que ha soltado root, y espera a que acabe.
+
+    Este proceso es root porque habla con el socket de Docker, que es
+    equivalente a root. Mandar un UDP a broadcast no necesita nada de eso, asi
+    que no lo hace como root: si el envio tuviera un fallo, lo tendria un
+    proceso que no puede tocar Docker ni el sistema de ficheros.
+    """
+    hijo = os.fork()
+    if hijo:
+        if os.waitstatus_to_exitcode(os.waitpid(hijo, 0)[1]) != 0:
+            raise RuntimeError("el proceso que manda el paquete ha fallado")
+        return
+    try:
+        if os.geteuid() == 0:
+            nadie = pwd.getpwnam(SIN_PRIVILEGIOS)
+            os.setgroups([])
+            os.setgid(nadie.pw_gid)
+            os.setuid(nadie.pw_uid)   # sin vuelta atras: setuid desde root es definitivo
+        hacer()
+        os._exit(0)
+    except BaseException as exc:
+        log.error("el envio ha fallado en el hijo: %s: %s", type(exc).__name__, exc)
+        os._exit(1)
+
+
+def despertar(equipo: str) -> dict:
+    """Manda el paquete magico al equipo. La MAC no sale de aqui."""
+    configurados = mapa(EQUIPOS)
+    mac = configurados.get(equipo)
+    if mac is None:
+        log.warning("rechazado: '%s' no esta en %s", equipo, EQUIPOS)
+        return {"ok": False,
+                "error": f"'{equipo}' no esta configurado. Hay: {', '.join(sorted(configurados)) or 'ninguno'}"}
+    try:
+        # Validar antes de forkear: si no, una MAC mal escrita en el fichero
+        # muere en el hijo y lo unico que se sabe es que "algo ha fallado".
+        datos = paquete(mac)
+    except ValueError as exc:
+        log.warning("rechazado: la MAC de '%s' no vale", equipo)
+        return {"ok": False, "error": f"'{equipo}': {exc}"}
+    try:
+        sin_root(lambda: _enviar(datos))
+    except Exception as exc:
+        log.error("no se pudo despertar '%s': %s", equipo, exc)
+        return {"ok": False, "error": f"no se pudo mandar el paquete: {exc}"}
+    log.info("paquete magico enviado a '%s' por %s:%s", equipo, BROADCAST, PUERTO_WOL)
+    return {
+        "ok": True,
+        "equipo": equipo,
+        # Wake-on-LAN no tiene acuse de recibo: esto es lo unico que se puede decir.
+        "aviso": "Paquete enviado. Wake-on-LAN no confirma nada: si el equipo estaba "
+                 "apagado y lo tiene activado, tarda un rato en arrancar.",
+    }
+
+
 class Handler(socketserver.StreamRequestHandler):
     timeout = TOPE_TOTAL
 
@@ -167,9 +262,13 @@ class Handler(socketserver.StreamRequestHandler):
             peticion = json.loads(self.rfile.readline() or b"{}")
             op = peticion.get("op")
             if op == "ping":
-                respuesta = {"ok": True, "stacks": sorted(set(stacks()) - EXCLUIDOS)}
+                respuesta = {"ok": True,
+                             "stacks": sorted(set(mapa(CONFIG)) - EXCLUIDOS),
+                             "equipos": sorted(mapa(EQUIPOS))}
             elif op == "actualizar":
                 respuesta = actualizar(str(peticion.get("stack", "")))
+            elif op == "despertar":
+                respuesta = despertar(str(peticion.get("equipo", "")))
             else:
                 respuesta = {"ok": False, "error": f"operacion desconocida: {op!r}"}
         except Exception as exc:  # que un fallo no tumbe el helper

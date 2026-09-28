@@ -256,6 +256,7 @@ movil. La tercera columna tiene dos pestanas, Chat y Briefing.
 | Estado | Un tile por contenedor con color segun su salud, mas RAM, discos y carga del anfitrion. Los `puente-*` van aparte (son los unicos sobre los que el agente puede actuar) y lo que no este sano sube arriba. Se refresca cada 15 s |
 | Chat | Lo mismo que `/api/chat`, pintando ademas los eventos que ya emitia y no veia nadie: las herramientas mientras se ejecutan, lo que entra en la cola y las conversaciones bloqueadas |
 | Briefing | El ultimo briefing guardado, con la hora a la que se genero bien visible (uno de las 7:30 leido a las seis de la tarde no puede parecer de ahora), y los anteriores plegados para comparar dias. Solo lee la tabla `briefings` |
+| Acciones | Botones grandes para el dedo. Hoy solo "Encender <equipo>": manda un Wake-on-LAN al momento, sin pasar por la cola de aprobaciones |
 | Ambient | A los 3 minutos sin tocar la pantalla. Letra grande y una sola cosa: lo que te reclama. Se sale tocando |
 
 Es JS plano servido por el propio agente: sin framework, sin compilacion, sin
@@ -273,6 +274,13 @@ curl -s localhost:8420/api/aprobaciones     # lo que espera un OK
 curl -s localhost:8420/api/estado           # contenedores y anfitrion (cache de 5 s)
 curl -s localhost:8420/api/agenda           # los eventos de hoy (cache de 5 min)
 curl -s "localhost:8420/api/briefings?limite=7"   # los ultimos guardados en la tabla
+curl -s localhost:8420/api/acciones         # los botones que hay, si hay alguno
+```
+
+Y uno que no es de lectura, el unico de la consola:
+
+```bash
+curl -s -X POST localhost:8420/api/acciones/despertar:sobremesa
 ```
 
 `/api/estado` y `/api/agenda` llaman al MCP por el mismo atajo, sin pasar por el
@@ -288,6 +296,33 @@ desde cada temporizador, no solo la llamada directa.
 
 La puerta sigue siendo la identidad del tailnet, la misma que la de `/api/chat`:
 la consola no tiene login propio.
+
+### Acciones rapidas
+
+Un boton de la consola **no pasa por la cola de aprobaciones**: se ejecuta al
+pulsarlo. La cola existe porque el modelo propone y tu decides; el boton eres tu
+decidiendo, y confirmar en el movil algo que acabas de pulsar con el dedo es
+teatro. Lo que si mantienen: quedan en `tool_calls` (con `origin='consola'`,
+para poder separarlas de las del modelo), `READ_ONLY` las apaga y la lista es
+fija: un id que no este en el catalogo da 404.
+
+**Encender el PC no es una herramienta del agente.** No esta en el mapa de
+riesgo, no la anuncia ningun servidor MCP y no aparece en ningun `tools/list`:
+el modelo no puede encenderlo ni sabe que se puede. Solo el boton. `deploy.sh`
+lo comprueba preguntandole a los servidores MCP que anuncian.
+
+Para que exista el boton hacen falta tres cosas:
+
+1. Wake-on-LAN activado en la BIOS del equipo y en su tarjeta de red.
+2. Una linea `nombre=MAC` en `/etc/puente/equipos.conf` del host (root, 600).
+3. `EQUIPOS_DESPERTABLES=nombre` en el `.env`. Sin eso no hay boton, y el
+   despliegue lo dice en voz alta en vez de callarse.
+
+El nombre es lo unico que viaja desde el agente: la MAC vive en el fichero del
+host y no sale de ahi, ni en la respuesta ni en los logs. El paquete lo manda el
+helper, y no como root: forkea un hijo que baja a `nobody` antes de abrir el
+socket. Se mandan tres copias, que es UDP y no hay acuse de recibo; por eso la
+consola dice "paquete enviado" y nunca "encendido".
 
 ### Ambient
 
@@ -339,12 +374,18 @@ docker compose exec postgres psql -U puente -d puente \
 Con `READ_ONLY=true` las escrituras ni se le ofrecen al modelo. El briefing y
 cualquier otra tarea programada tampoco pueden encolarlas: solo lectura.
 
-## Actualizar stacks: el helper del host
+## El helper del host
 
-`lab_update_stack` hace `compose pull` + `up -d` sobre un stack del homelab. Eso
-no cabe en el socket-proxy (habria que abrir crear y borrar contenedores, y se
-acabo la frontera), asi que lo hace un proceso pequeno del host, fuera de
-Docker, con una sola operacion. El porque, en `CLAUDE.md`.
+Un proceso pequeno del host, fuera de Docker, con dos operaciones y nada mas:
+
+- **`actualizar(stack)`**, lo que hay detras de `lab_update_stack`: `compose
+  pull` + `up -d`. No cabe en el socket-proxy (habria que abrir crear y borrar
+  contenedores, y se acabo la frontera).
+- **`despertar(equipo)`**, lo que hay detras del boton "Encender" de la consola:
+  un paquete magico a la LAN. Esto **no** es una herramienta del agente.
+
+Las dos van por clave de un fichero del host: nunca una ruta, ni un comando, ni
+una MAC por parametro. El porque, en `CLAUDE.md`.
 
 ### Instalarlo (a mano, una vez)
 
@@ -354,8 +395,9 @@ sudo ./scripts/instalar_helper.sh
 
 Dice todo lo que va a hacer y pregunta antes de tocar nada: crea el grupo
 `puente-helper`, copia el helper a `/usr/local/lib/puente/`, crea
-`/etc/puente/stacks.conf` (root, 600) e instala y arranca la unidad de systemd.
-Al acabar te dice el `HELPER_GID` que tienes que poner en el `.env`.
+`/etc/puente/stacks.conf` y `/etc/puente/equipos.conf` (root, 600) e instala y
+arranca la unidad de systemd. Al acabar te dice el `HELPER_GID` que tienes que
+poner en el `.env`.
 
 Despues, en `/etc/puente/stacks.conf`, una linea por stack:
 
@@ -370,7 +412,20 @@ STACKS_ACTUALIZABLES=paperless
 HELPER_GID=<el que dijo el instalador>
 ```
 
-Sin `STACKS_ACTUALIZABLES`, la herramienta no existe para el agente.
+Y en `/etc/puente/equipos.conf`, una linea por equipo que quieras poder
+encender desde la consola:
+
+```
+sobremesa=AA:BB:CC:DD:EE:FF
+```
+
+```
+EQUIPOS_DESPERTABLES=sobremesa
+```
+
+Sin `STACKS_ACTUALIZABLES`, la herramienta no existe para el agente; sin
+`EQUIPOS_DESPERTABLES`, no hay boton de encender. El despliegue dice cual de las
+dos esta apagada en vez de callarselo.
 
 `apiarena`, `puente` y `nextcloud` no se actualizan nunca, aunque los pongas en
 `stacks.conf`: la lista esta en el codigo del helper y se mira tres veces (la

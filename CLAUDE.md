@@ -41,6 +41,13 @@ funciona: `agent/app/aprobaciones.py`.
 | `write` | Entra en la cola: push al movil, Edu ve la accion y los argumentos, un toque. Caduca a los 15 min. |
 | `sensitive` | Ademas, la consola muestra el comando exacto, el diff o el cuerpo del correo. |
 
+Un boton de accion rapida de la consola (`origin='consola'`) **no pasa por la
+cola**, y es la unica excepcion. La cola existe porque el modelo propone y el
+humano decide; el boton ES el humano decidiendo, y pedir una segunda
+confirmacion en el movil de algo que se acaba de pulsar con el dedo es teatro.
+Lo demas se mantiene: se auditan, `READ_ONLY` las apaga y la lista es fija. Ver
+"Acciones rapidas".
+
 Una tarea programada (`origin` distinto de `user`, como el briefing) solo puede
 usar nivel `read`, y seguira siendo asi cuando exista la cola: a las 7:30 no hay
 nadie delante para aprobar nada. Esta en la capa de permisos
@@ -306,8 +313,8 @@ que un job diario vacia el contenido de las filas de mas de 30 dias
   **(hecha, sin pgvector: ver la revision)**; `lab_update_stack` por el helper
   del host **(hecho)**. Falta: eventos de calendario.
 - **F3 — La consola.** Dashboard en la tablet **(hecho: aprobaciones, estado,
-  chat, briefing y modo ambient)**. Faltan: Fully Kiosk, acciones rapidas, WoL
-  y Home Assistant.
+  chat, briefing, modo ambient y acciones rapidas con Wake-on-LAN)**. Faltan:
+  Fully Kiosk y Home Assistant.
 - **F4 —** GitHub/PRs, proactividad, voz, 8B local para resumenes de madrugada.
 
 ---
@@ -385,9 +392,16 @@ Asi que esa operacion vive fuera de Docker, en `helper/puente_helper.py`: un
 proceso del host, unidad systemd, escuchando en un socket unix. Es el primer
 componente del proyecto fuera del sandbox, y estos son sus limites:
 
-- **Una sola operacion util**: `actualizar(stack)`. Nunca una ruta, ni un
-  comando, ni un fichero compose. `stack` es una CLAVE de
-  `/etc/puente/stacks.conf` (root, 600, fuera del repo).
+- **Dos operaciones utiles**, y las dos por CLAVE de un fichero del host (root,
+  600, fuera del repo). Nunca una ruta, ni un comando, ni un fichero compose, ni
+  una MAC:
+  - `actualizar(stack)`, clave de `/etc/puente/stacks.conf` -> `pull` + `up -d`.
+  - `despertar(equipo)`, clave de `/etc/puente/equipos.conf` -> paquete magico a
+    la broadcast de la LAN, puerto 9. El envio no corre como root: forkea un
+    hijo que suelta los grupos y hace `setgid`/`setuid` a `nobody` antes de
+    abrir el socket. Este proceso es root por el socket de Docker; mandar un
+    UDP no tiene por que serlo. Comprobado como root: uid/gid 65534, sin grupos
+    suplementarios, sin poder volver a root ni leer `/etc/shadow`.
 - **Exclusiones en el codigo, no en la configuracion**: `apiarena`
   (produccion), `puente` (se mataria a si mismo a mitad y dejaria la aprobacion
   colgada) y `nextcloud` (fotos familiares irreemplazables, y Nextcloud solo
@@ -418,6 +432,31 @@ componente del proyecto fuera del sandbox, y estos son sus limites:
 Sin vuelta atras automatica: la respuesta trae los digests de ANTES y acaban en
 la notificacion, para que revertir sea un comando y no una investigacion.
 
+## Acciones rapidas (F3): el boton ES la aprobacion
+
+`agent/app/acciones.py`. Un boton de la consola se ejecuta al pulsarlo, sin
+cola, sin nonce y sin push. El razonamiento esta arriba, en la regla 3. Lo que
+no cambia: van a `tool_calls` con `origin='consola'`, `READ_ONLY` las apaga y la
+lista es cerrada (`catalogo()`), de modo que un id que no este en ella da 404 y
+ni siquiera se audita, porque la fila llevaria como nombre lo que venga en la URL.
+
+**Despertar el PC NO es una herramienta MCP, y eso es la mitad del diseno.** El
+modelo no puede encenderlo ni sabe que se puede: no esta en `RIESGO`, no la
+anuncia ningun servidor y no aparece en ningun `tools/list`. Si lo fuera,
+bastaria con que un correo le convenciera. Por eso el agente habla con el helper
+del host por su socket directamente para esto, sin pasar por `homelab-mcp`.
+
+Eso tiene un precio que conviene tener escrito: el contenedor del agente esta
+ahora en el grupo del socket del helper, asi que desde dentro se puede pedir
+tambien `actualizar(stack)`. No lo puede hacer el modelo (no hay herramienta,
+no hay endpoint), lo podria hacer quien ejecute codigo dentro de ese
+contenedor. A esas alturas ya tiene la base y las claves de la API: el delta es
+pequeno y es el precio de que encender el PC no sea una herramienta.
+
+Dos comprobaciones sostienen esto, y las dos son de las que fallan si alguien se
+despista: `pruebas.wol_no_es_herramienta()` mira el mapa de riesgo del agente, y
+`deploy.sh` pregunta a los servidores MCP de verdad que anuncian.
+
 ## La consola (F3, primera version)
 
 `agent/consola/`: un HTML con su CSS y su JS, un manifest y un service worker,
@@ -426,12 +465,13 @@ detras de las rutas de la API: montarlo antes se come `/healthz` y deja el
 contenedor unhealthy). Sin framework, sin compilacion, sin Node y sin
 contenedor nuevo.
 
-Cuatro vistas: aprobaciones (resolver desde la tablet, que es lo que no se
+Cinco vistas: aprobaciones (resolver desde la tablet, que es lo que no se
 puede hacer siempre desde la notificacion), estado (tiles por contenedor y
 medidas del anfitrion), chat (que ademas pinta los eventos `tool`,
 `aprobacion`, `bloqueada` y `limite`, que ya se emitian y no veia nadie) y
-briefing (el ultimo guardado y los anteriores plegados). Chat y briefing
-comparten la tercera columna con dos pestanas.
+briefing (el ultimo guardado y los anteriores plegados) y acciones (botones
+grandes para el dedo; hoy solo "Encender"). Chat, briefing y acciones comparten
+la tercera columna en pestanas.
 
 **Ninguna pantalla que se refresque sola llama al modelo.** Es la regla de la
 segunda tanda y no una casualidad: la tablet esta encendida todo el dia y en
@@ -456,6 +496,8 @@ Cuatro endpoints, todos de lectura:
   cada 30 s y en ambient la tablet la pide todo el dia: no hace falta una
   peticion a Google por cada refresco.
 - `GET /api/briefings?limite=N`: la tabla `briefings` tal cual. No genera nada.
+- `GET /api/acciones` y `POST /api/acciones/{id}`: la lista fija de botones y su
+  ejecucion. El unico sitio de la consola que hace algo en vez de mirarlo.
 
 **Modo ambient**: a los 3 min sin tocar la pantalla, letra grande legible desde
 el otro lado de la habitacion. Saca UNA cosa, por este orden: aprobaciones

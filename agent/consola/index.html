@@ -125,6 +125,18 @@ details .resumen { margin-top: 8px; font-size: 13.5px; color: var(--suave); }
 button.generar { background: none; border-style: dashed; color: var(--suave); font-size: 13px; width: 100%; }
 button.generar.armado { border-style: solid; border-color: var(--ojo); color: var(--ojo); }
 
+/* --- acciones: botones para el dedo, tablet vertical de pared --- */
+.rejilla { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
+button.accion {
+  flex: none; min-height: 104px; padding: 16px; font-size: 17px; font-weight: 600;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px; text-align: left;
+}
+button.accion .sub { font-size: 12.5px; font-weight: 400; color: var(--suave); white-space: normal; }
+button.accion.hecho { background: #17351f; border-color: #2b5a34; }
+button.accion.hecho .sub { color: var(--ok); }
+button.accion.fallo { background: #35191a; border-color: #5a2b2b; }
+button.accion.fallo .sub { color: var(--mal); }
+
 /* --- ambient: se lee desde el otro lado de la habitacion --- */
 #ambient { display: none; }
 body.ambiente header, body.ambiente main { display: none; }
@@ -177,6 +189,7 @@ body.ambiente #ambient {
     <h2 class="pestanas">
       <button class="pestana activa" data-panel="chat">Chat</button>
       <button class="pestana" data-panel="briefing">Briefing</button>
+      <button class="pestana" data-panel="acciones">Acciones</button>
     </h2>
     <div class="panel" id="panel-chat">
       <div class="cuerpo" id="hilo"></div>
@@ -191,6 +204,9 @@ body.ambiente #ambient {
         <!-- El unico boton de la consola que llama al modelo. Dos toques y lo dice. -->
         <button class="generar" id="generar">Generar uno nuevo · llama al modelo</button>
       </div>
+    </div>
+    <div class="panel oculto" id="panel-acciones">
+      <div class="cuerpo" id="acciones"><p class="vacio">Cargando…</p></div>
     </div>
   </section>
 </main>
@@ -778,6 +794,64 @@ function pintarAmbient() {
   refrescarCuentas();
 }
 
+// ---------------------------------------------------------------- acciones
+// Se ejecutan al pulsar, sin pasar por la cola: el boton ES la aprobacion (el
+// porque, en agent/app/acciones.py). Nada de esto se refresca solo.
+let lasAcciones = [], soloLectura = false;
+
+async function cargarAcciones() {
+  try {
+    const r = await fetch("/api/acciones");
+    const d = await r.json();
+    lasAcciones = d.acciones || [];
+    soloLectura = !!d.read_only;
+  } catch (e) {
+    lasAcciones = [];
+  }
+  pintarAcciones();
+}
+
+function caraDelBoton(boton, accion, texto, clase) {
+  boton.className = "accion " + (clase || "");
+  boton.replaceChildren(crear("span", null, accion.etiqueta), crear("span", "sub", texto));
+}
+
+function pintarAcciones() {
+  const caja = $("#acciones");
+  caja.replaceChildren();
+  if (!lasAcciones.length) {
+    caja.append(crear("p", "vacio", "No hay ninguna acción configurada. Se activan con EQUIPOS_DESPERTABLES en el .env del server."));
+    return;
+  }
+  const rejilla = crear("div", "rejilla");
+  for (const accion of lasAcciones) {
+    const boton = crear("button");
+    caraDelBoton(boton, accion, soloLectura ? "Modo solo lectura: desactivada" : accion.detalle);
+    boton.disabled = soloLectura;
+    boton.onclick = () => lanzarAccion(accion, boton);
+    rejilla.append(boton);
+  }
+  caja.append(rejilla);
+}
+
+async function lanzarAccion(accion, boton) {
+  boton.disabled = true;
+  caraDelBoton(boton, accion, "Enviando…");
+  let d;
+  try {
+    const r = await fetch("/api/acciones/" + encodeURIComponent(accion.id), { method: "POST" });
+    d = await r.json();
+  } catch (e) {
+    d = { ok: false, error: String(e) };
+  }
+  // Un paquete WoL no tiene acuse de recibo: lo unico honesto que se puede
+  // decir es que salio, y a que hora.
+  caraDelBoton(boton, accion,
+    d.ok ? `${d.aviso || "Hecho"} · ${hora(new Date())}` : `No ha salido: ${d.error || "?"}`,
+    d.ok ? "hecho" : "fallo");
+  setTimeout(() => { caraDelBoton(boton, accion, accion.detalle); boton.disabled = soloLectura; }, 15000);
+}
+
 // ---------------------------------------------------------------- arranque
 // Todo lo que la consola refresca sola. NINGUNA de estas llama al modelo: la
 // tablet esta encendida todo el dia y nadie ha pedido nada. Lo comprueba
@@ -802,6 +876,7 @@ programar(REFRESCOS.normal);
 cargarAprobaciones();
 cargarEstado();
 cargarBriefings();
+cargarAcciones();   // la lista sale del .env: no cambia sola, se pide una vez
 for (const ev of ["pointerdown", "keydown", "wheel", "touchstart"]) addEventListener(ev, despertar, { passive: true });
 // El sistema suelta el wakeLock al ocultar la pagina; si seguimos en ambient, se vuelve a pedir.
 document.addEventListener("visibilitychange", () => { if (ambiente && document.visibilityState === "visible") pantalla(true); });

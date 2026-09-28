@@ -51,8 +51,10 @@ CREATE TABLE IF NOT EXISTS tool_calls (
     result           jsonb,
     error            text,
     model            text,
-    -- de donde salio la orden: 'user' (tu, en la consola) o 'schedule'.
-    -- Nunca 'content': el contenido de un correo no es una orden.
+    -- de donde salio la orden: 'user' (tu, escribiendo), 'schedule' (el
+    -- briefing) o 'consola' (un boton de accion rapida, que no pasa por la
+    -- cola porque lo pulsas tu). Nunca 'content': el contenido de un correo
+    -- no es una orden.
     origin           text NOT NULL DEFAULT 'user',
     requested_at     timestamptz NOT NULL DEFAULT now(),
     resolved_at      timestamptz
