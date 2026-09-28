@@ -15,6 +15,10 @@ un fichero del host (root, 600, fuera del repo), nunca por parametro libre:
 Nunca una ruta, ni un comando, ni un fichero compose, ni una MAC suelta.
 """
 
+# Corre con el python del sistema, que es el que haya: las anotaciones no se
+# evaluan y "str | None" no pide 3.10.
+from __future__ import annotations
+
 import json
 import logging
 import os
@@ -90,6 +94,38 @@ def servicios(ruta: str) -> set[str]:
     return set(r.stdout.split())
 
 
+# Los nombres que busca `docker compose` en el directorio del proyecto, en su
+# orden. Si no hay ninguno, --project-directory no sirve de nada.
+COMPOSES = ("compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml")
+
+
+def problema(ruta: str) -> str | None:
+    """Por que esa ruta no vale como --project-directory, o None si vale.
+
+    En stacks.conf va la CARPETA del proyecto, no su fichero compose. Poner el
+    fichero es el error facil, y sin esto no falla al configurar: falla en mitad
+    de una actualizacion ya aprobada, con un error de compose sobre un .env que
+    no dice nada. Se mira al leer el mapa, no al usarlo.
+    """
+    if os.path.isfile(ruta):
+        return (f"'{ruta}' es un fichero: en stacks.conf va la CARPETA del proyecto, "
+                f"no su compose (prueba con '{os.path.dirname(ruta) or '.'}')")
+    if not os.path.isdir(ruta):
+        return f"'{ruta}' no existe o no es un directorio"
+    if not any(os.path.isfile(os.path.join(ruta, c)) for c in COMPOSES):
+        return f"en '{ruta}' no hay ningun fichero compose ({' / '.join(COMPOSES)})"
+    return None
+
+
+def stacks_mal() -> dict[str, str]:
+    """Las entradas de stacks.conf que no sirven, con su motivo.
+
+    Los excluidos no cuentan: no se actualizan nunca, asi que como esten
+    escritos da igual y avisar de ellos solo pararia un despliegue por nada.
+    """
+    return {n: m for n, r in mapa(CONFIG).items() if n not in EXCLUIDOS and (m := problema(r))}
+
+
 def _filas(ruta: str) -> list[dict]:
     salida = compose(ruta, "ps", "--all", "--format", "json", tope=30).stdout.strip()
     if not salida:
@@ -135,6 +171,9 @@ def actualizar(stack: str) -> dict:
     if ruta is None:
         log.warning("rechazado: '%s' no esta en %s", stack, CONFIG)
         return {"ok": False, "error": f"'{stack}' no esta configurado. Hay: {', '.join(sorted(configurados)) or 'ninguno'}"}
+    if (mal := problema(ruta)) is not None:
+        log.warning("rechazado: '%s' mal configurado: %s", stack, mal)
+        return {"ok": False, "error": f"'{stack}' esta mal configurado en {CONFIG}: {mal}"}
     if os.path.basename(os.path.realpath(ruta)) in EXCLUIDOS:
         log.warning("rechazado: '%s' apunta a un directorio excluido", stack)
         return {"ok": False, "error": f"'{stack}' apunta a un stack excluido"}
@@ -262,8 +301,13 @@ class Handler(socketserver.StreamRequestHandler):
             peticion = json.loads(self.rfile.readline() or b"{}")
             op = peticion.get("op")
             if op == "ping":
+                # stacks son los que se pueden actualizar de verdad; los que
+                # estan mal configurados salen aparte y con el motivo, para que
+                # el despliegue los vea en vez de descubrirlos al usarlos.
+                malos = stacks_mal()
                 respuesta = {"ok": True,
-                             "stacks": sorted(set(mapa(CONFIG)) - EXCLUIDOS),
+                             "stacks": sorted(set(mapa(CONFIG)) - EXCLUIDOS - set(malos)),
+                             "stacks_mal": malos,
                              "equipos": sorted(mapa(EQUIPOS))}
             elif op == "actualizar":
                 respuesta = actualizar(str(peticion.get("stack", "")))
