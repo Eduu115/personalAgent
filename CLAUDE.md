@@ -427,7 +427,25 @@ componente del proyecto fuera del sandbox, y estos son sus limites:
   es equivalente a root, asi que se lee de una sentada. Si crece, algo va mal.
 - **Topes**: 90 s esperando healthchecks, 8 min el pull, 10 min en total.
 - **Se instala a mano** (`scripts/instalar_helper.sh`), nunca desde el
-  despliegue. El deploy no instala unidades de systemd.
+  despliegue. El deploy no instala unidades de systemd. Lo que corre es la copia
+  de `/usr/local/lib/puente/`: un `git pull` no la toca, hay que volver a
+  ejecutar el instalador, que ahora ademas hace `restart` (con `enable --now`,
+  un servicio que ya estaba vivo se quedaba con el codigo viejo en memoria).
+
+Dos cosas de la unidad de systemd que costaron un rato y estan comentadas en el
+propio fichero, porque las dos parecen un descuido si no:
+
+- **`RuntimeDirectoryMode=0755`, no 0750.** Para abrir el socket hay que poder
+  atravesar el directorio que lo contiene, y `/run/puente` es de `root:root`.
+  Con 0750 ni `homelab-mcp` ni el agente llegaban al socket *aunque estuvieran
+  en el grupo*, y `deploy.sh` lo reportaba como "no existe el socket". El
+  control de acceso no se afloja: sigue en el socket, `root:puente-helper` 0660.
+  Comprobado bajo systemd de verdad: con el directorio en 0755, un usuario del
+  grupo hace ping y uno de fuera se lleva un `PermissionError`.
+- **`RestrictAddressFamilies=AF_UNIX AF_INET`.** Sin `AF_INET`, el `socket()`
+  del paquete de Wake-on-LAN falla con `EAFNOSUPPORT` dentro del hijo y el boton
+  de encender no funciona nunca. Solo pasa bajo systemd, asi que probando el
+  helper a mano no se ve.
 
 Sin vuelta atras automatica: la respuesta trae los digests de ANTES y acaban en
 la notificacion, para que revertir sea un comando y no una investigacion.
