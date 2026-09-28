@@ -167,6 +167,56 @@ def fetch_imap() -> None:
     print("OK respuesta FETCH de imaplib: agrupado, ids, etiquetas UTF-7, leidos")
 
 
+def cortar_sin_partir_claves() -> None:
+    """Se redacta ENTERO y despues se corta, no al reves.
+
+    Cortar primero deja dentro la primera mitad de una clave que caiga justo en
+    el corte. Pasa en los tres sitios que capan texto: el cuerpo (4.000), el
+    snippet de la busqueda (200) y la muestra del texto oculto (300).
+    """
+    from .correo import capado
+
+    clave = "sk-ant-api03-ESTACLAVEESTAJUSTOENELCORTE123456"   # 44 caracteres
+    for tope in (200, 300, 4000):
+        # La clave empieza 29 caracteres antes del corte y acaba 15 despues, o
+        # sea que lo cruza. Cortando primero quedarian dentro sus 29 primeros
+        # caracteres, que siguen siendo una clave. El espacio de delante no es
+        # decorativo: los patrones anclan en \b, que es como aparece de verdad
+        # (detras de un espacio, un = o una comilla).
+        texto = "a" * (tope - 30) + " " + clave + " " + "b" * 80
+        salida = capado(texto, tope)
+        assert len(salida) <= tope
+        assert "sk-ant" not in salida, f"tope {tope}: ha quedado un trozo de clave: ...{salida[-40:]}"
+        assert "[REDACTADO" in salida, f"tope {tope}: la clave caia dentro y tendria que verse tapada"
+    # Los que de verdad se escapaban: sus patrones necesitan algo que queda al
+    # otro lado del corte (la @ del DSN, el tercer trozo del JWT), asi que el
+    # fragmento visible ya no casaba con nada y salia en claro. Una clave sk-
+    # se salvaba de chiripa, porque su trozo seguia pareciendo una clave.
+    for nombre, secreto, fuga in (
+        ("DSN", "postgresql://app:hunter2secretodeverdad@db:5432/prod", "hunter2"),
+        ("JWT", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.firmafirma", "eyJhbGciOiJIUzI1"),
+    ):
+        texto = "a" * 170 + " " + secreto + " y sigue"
+        assert fuga not in capado(texto, 200), f"{nombre}: se escapa un trozo del secreto"
+
+    # Y sin claves, capado() no toca nada mas que la longitud.
+    assert capado("hola que tal", 5) == "hola "
+    print("OK cortar: con topes de 200, 300 y 4.000, y con DSN y JWT pegados al corte, nada se escapa")
+
+
+def contar_lo_que_se_ve() -> None:
+    """El recuento de secretos es de la ventana que recibe el modelo, no del documento."""
+    from .correo import capado, vistos
+
+    largo = "clave sk-ant-api03-UNADELPRINCIPIO0123456789 al principio\n" + "x" * 5000
+    largo += "\ny otra sk-ant-api03-ALFINALDELTODO9876543210 al final"
+    cuerpo_visible = capado(largo, 4000)
+    assert vistos(cuerpo_visible) == 1, "solo se ve la del principio: la del final queda fuera del corte"
+    assert vistos("sin nada") == 0
+    assert vistos("[REDACTADO:clave] y [REDACTADO]", "[REDACTADO:jwt]") == 3
+    print("OK recuento: cuenta las tapadas que se ven, no las del documento entero")
+
+
 def redaccion() -> None:
     asunto, n = redactar("Tu api_key=sk-abcdefgh12345678 y Authorization: Bearer abc.def.ghi")
     assert "sk-abcdefgh" not in asunto and "abc.def.ghi" not in asunto and n >= 2, asunto
@@ -252,6 +302,8 @@ if __name__ == "__main__":
     cabeceras()
     cuerpos()
     fetch_imap()
+    cortar_sin_partir_claves()
+    contar_lo_que_se_ve()
     redaccion()
     ical()
     print("todo OK")

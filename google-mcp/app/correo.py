@@ -352,6 +352,28 @@ def _metadatos(msgid: str | None, meta: bytes, msg: EmailMessage) -> tuple[dict[
     }, n
 
 
+def capado(texto: str, tope: int) -> str:
+    """Redacta el texto ENTERO y despues corta. Nunca al reves.
+
+    Cortar primero deja dentro la primera mitad de una clave que caiga justo en
+    el corte, y un trozo de clave sigue siendo una clave en el prompt. Vale lo
+    mismo para el cuerpo, para el snippet y para la muestra del texto oculto.
+    """
+    limpio, _ = redactar(texto)
+    return limpio[:tope]
+
+
+def vistos(*textos: str) -> int:
+    """Cuantos secretos tapados se VEN en lo que se devuelve.
+
+    No los del documento entero: el modelo recibe una ventana, y un "20
+    secretos redactados" al lado de un trozo donde no se ve ninguno le hace
+    contar cosas que no ha recibido. De lo que se corta ya avisa el campo de
+    truncado.
+    """
+    return sum(t.count("[REDACTADO") for t in textos)
+
+
 def buscar(query: str, maximo: int) -> dict[str, Any]:
     with _conexion() as imap:
         # Como literal y no entre comillas: la query va tal cual, con tildes,
@@ -383,12 +405,11 @@ def buscar(query: str, maximo: int) -> dict[str, Any]:
         )
         datos, n = _metadatos(numero(m["meta"], b"X-GM-MSGID"), m["meta"], msg)
         texto, oculto = cuerpo(msg)
-        snippet, n2 = redactar(texto.replace("\n", " ")[:MAX_SNIPPET])
-        datos["snippet"] = snippet
+        datos["snippet"] = capado(texto.replace("\n", " "), MAX_SNIPPET)
         if oculto:
             datos["texto_oculto"] = True
         salida.append((orden.get(numero(m["meta"], b"UID") or "", len(orden)), datos))
-        redactados += n + n2
+        redactados += n + vistos(datos["snippet"])
     salida.sort(key=lambda par: par[0])
     return {
         "query": query,
@@ -419,20 +440,27 @@ def leer(msgid: str) -> dict[str, Any]:
 
     datos, n = _metadatos(msgid, m["meta"], msg)
     texto, oculto = cuerpo(msg)
-    texto, n2 = redactar(texto)
     datos["para"] = cabecera(msg, "To")
     datos["cc"] = cabecera(msg, "Cc") or None
     datos["adjuntos"] = [_sin_sustitutos(a.get_filename() or "(sin nombre)") for a in msg.iter_attachments()]
-    datos["cuerpo"] = texto[:MAX_CUERPO]
-    if len(texto) > MAX_CUERPO:
-        datos["cuerpo_truncado"] = f"se muestran {MAX_CUERPO} de {len(texto)} caracteres"
+    limpio, _ = redactar(texto)
+    datos["cuerpo"] = limpio[:MAX_CUERPO]
+    if len(limpio) > MAX_CUERPO:
+        datos["cuerpo_truncado"] = f"se muestran {MAX_CUERPO} de {len(limpio)} caracteres"
     if len(crudo) >= _BYTES_MENSAJE:
         datos["mensaje_truncado"] = "el mensaje pasa de 1 MB: solo se ha leido el primero"
+    muestra = ""
     if oculto:
-        muestra, n3 = redactar(oculto[:300])
-        n2 += n3
-        datos["texto_oculto"] = {"caracteres": len(oculto), "muestra": muestra, "aviso": AVISO_OCULTO}
-    datos["secretos_redactados"] = n + n2
+        muestra = capado(oculto, 300)
+        datos["texto_oculto"] = {
+            # caracteres es el tamano del texto oculto ENTERO, que es el dato
+            # que importa ("hay 8.000 caracteres escondidos"); muestra son los
+            # primeros 300, y lo dice su nombre.
+            "caracteres": len(oculto),
+            "muestra": muestra,
+            "aviso": AVISO_OCULTO,
+        }
+    datos["secretos_redactados"] = n + vistos(datos["cuerpo"], muestra)
     datos["aviso"] = AVISO_LECTURA
     return datos
 
