@@ -463,11 +463,21 @@ componente del proyecto fuera del sandbox, y estos son sus limites:
   27/9 y se quito: borra contenedores del proyecto que ya no esten en el
   compose, y aqui no se borra nada. Un contenedor huerfano se queda y se mira;
   un contenedor borrado no vuelve.
+- **La configuracion se valida al leerla, no al usarla.** Cada ruta de
+  `stacks.conf` tiene que ser un directorio existente con un compose dentro: es
+  lo que recibe `--project-directory`. Poner ahi el fichero compose en vez de su
+  carpeta es el error facil y antes no fallaba hasta la mitad de una
+  actualizacion ya aprobada. Ahora la entrada sale marcada en el `ping` y
+  `deploy.sh` se para.
 - **El permiso es el socket**: root:`puente-helper`, modo 660. Ni puerto ni
   token. Quien este en ese grupo puede pedirlo, y eso es `homelab-mcp` por
   `group_add`.
-- **Sin dependencias y pequeno** (~130 lineas): tiene el socket de Docker, que
-  es equivalente a root, asi que se lee de una sentada. Si crece, algo va mal.
+- **Sin dependencias y se lee de una sentada**: tiene el socket de Docker, que
+  es equivalente a root. Nacio con ~130 lineas y el tope era 150; hoy va por
+  ~250, repartidas entre la segunda operacion (`despertar`, con su bajada a
+  `nobody`) y las validaciones de configuracion. Cada subida esta razonada en
+  su PR, pero el numero ya no es el que se puso: la siguiente que lo mueva,
+  que sea para bajarlo.
 - **Topes**: 90 s esperando healthchecks, 8 min el pull, 10 min en total.
 - **Se instala a mano** (`scripts/instalar_helper.sh`), nunca desde el
   despliegue. El deploy no instala unidades de systemd. Lo que corre es la copia

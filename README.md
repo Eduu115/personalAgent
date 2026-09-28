@@ -399,11 +399,22 @@ Dice todo lo que va a hacer y pregunta antes de tocar nada: crea el grupo
 arranca la unidad de systemd. Al acabar te dice el `HELPER_GID` que tienes que
 poner en el `.env`.
 
-Despues, en `/etc/puente/stacks.conf`, una linea por stack:
+Despues, en `/etc/puente/stacks.conf`, una linea por stack. El valor es **la
+carpeta del proyecto, no el fichero compose**: es lo que recibe
+`docker compose --project-directory`, y ahi dentro tienen que estar el compose
+y su `.env`.
 
 ```
-paperless=/home/edu/apps/paperless
+paperless=/home/edu/apps/paperless          # la carpeta
+#paperless=/home/edu/apps/paperless/docker-compose.yml   # NO: es el fichero
 ```
+
+El helper comprueba cada linea al leerla: si la ruta no es un directorio que
+exista, o no tiene dentro ningun `compose.yaml` / `docker-compose.yml`, esa
+entrada queda marcada como mal configurada, sale asi en el `ping` y el
+despliegue se para diciendo cual es y por que. Antes eso no fallaba hasta la
+mitad de una actualizacion ya aprobada, con un error de compose sobre un `.env`
+que no decia nada.
 
 y en el `.env` del proyecto, los que quieras que el agente pueda tocar:
 

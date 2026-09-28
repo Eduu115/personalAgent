@@ -367,6 +367,15 @@ else
         *'"ok": true'*) echo "helper: responde al ping" ;;
         *) fallo "el helper no contesta (el motivo esta justo encima): journalctl -u puente-helper -n 30" ;;
     esac
+    # Una ruta de stacks.conf que no es la carpeta de un proyecto (el error
+    # facil: poner el compose en vez de su carpeta) no falla al configurar,
+    # falla en mitad de una actualizacion ya aprobada. El helper las marca en
+    # el ping y aqui se ven antes.
+    stacks_malos="$(printf '%s' "$saludo" | python3 -c 'import json, sys
+mal = json.load(sys.stdin).get("stacks_mal", {})
+print("; ".join(f"{nombre} -> {motivo}" for nombre, motivo in sorted(mal.items())))')"
+    [ -z "$stacks_malos" ] || fallo "hay stacks mal configurados en /etc/puente/stacks.conf del host: $stacks_malos"
+
     case "$(preguntar_helper "$HELPER_SOCKET" '{"op":"actualizar","stack":"no-existe-este-stack"}')" in
         *'"ok": false'*) echo "helper: un stack fuera de su mapa, rechazado" ;;
         *) fallo "el helper NO rechaza un stack desconocido" ;;
