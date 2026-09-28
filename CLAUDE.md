@@ -442,6 +442,17 @@ propio fichero, porque las dos parecen un descuido si no:
   control de acceso no se afloja: sigue en el socket, `root:puente-helper` 0660.
   Comprobado bajo systemd de verdad: con el directorio en 0755, un usuario del
   grupo hace ping y uno de fuera se lleva un `PermissionError`.
+- **`RuntimeDirectoryPreserve=yes`, y los contenedores montan el DIRECTORIO
+  `/run/puente`, no el fichero del socket.** `RuntimeDirectory=` hace que
+  systemd borre y recree el directorio en cada arranque del servicio, con un
+  inodo nuevo. Un bind mount de Docker resuelve su origen al arrancar el
+  contenedor, asi que montando el socket los contenedores se quedaban agarrados
+  al inodo viejo: `ConnectionRefused` para siempre, en silencio, con el socket
+  nuevo ahi al lado y perfecto. **Cada reinstalacion del helper rompia los dos
+  contenedores.** Con `Preserve` el directorio sobrevive, y montando el
+  directorio el socket se resuelve al conectar. Medido: sin `Preserve`, el inodo
+  de `/run/puente` iba 202 -> 208 -> 213 en tres reinicios; con el, se queda
+  quieto y solo cambia el del socket, que es lo que da igual.
 - **`RestrictAddressFamilies=AF_UNIX AF_INET`.** Sin `AF_INET`, el `socket()`
   del paquete de Wake-on-LAN falla con `EAFNOSUPPORT` dentro del hijo y el boton
   de encender no funciona nunca. Solo pasa bajo systemd, asi que probando el

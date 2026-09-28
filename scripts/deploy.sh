@@ -289,6 +289,11 @@ else
     # /run/puente en root:root sin permiso de paso, y ni los contenedores (con
     # su group_add) ni este script llegaban al socket, que estaba perfecto.
     directorio="$(dirname "$HELPER_SOCKET")"
+    # Los contenedores montan HELPER_DIR; las comprobaciones de aqui miran
+    # HELPER_SOCKET. Si no cuadran, esto daria por bueno un socket que dentro
+    # del contenedor no existe.
+    HELPER_DIR="$(sed -n 's/^HELPER_DIR=//p' .env)"
+    [ "${HELPER_DIR:-/run/puente}" = "$directorio" ] || fallo "HELPER_DIR (${HELPER_DIR:-/run/puente}) y HELPER_SOCKET ($HELPER_SOCKET) no cuadran: los contenedores montarian un directorio y el socket estaria en otro"
     if [ ! -d "$directorio" ]; then
         fallo "no existe $directorio: el helper no esta instalado o no ha arrancado nunca (sudo ./scripts/instalar_helper.sh)"
     fi
@@ -308,6 +313,16 @@ else
         "root "*" 660") echo "helper: socket $HELPER_SOCKET ($permisos)" ;;
         *) fallo "el socket del helper tiene permisos '$permisos', se esperaba 'root <grupo> 660'" ;;
     esac
+    # La unidad que corre, no la del repo: el instalador copia a
+    # /usr/local/lib/puente y un git pull no actualiza nada de eso. Sin
+    # Preserve, systemd recrea el directorio en cada arranque del servicio y
+    # deja a los contenedores mirando un inodo que ya no existe.
+    if command -v systemctl >/dev/null 2>&1; then
+        case "$(systemctl show puente-helper -p RuntimeDirectoryPreserve --value 2>/dev/null)" in
+            yes) echo "helper: la unidad conserva /run/puente entre reinicios" ;;
+            *) fallo "la unidad instalada no tiene RuntimeDirectoryPreserve=yes: cada reinicio del helper dejara a los contenedores con un inodo viejo. Reinstalala: sudo ./scripts/instalar_helper.sh" ;;
+        esac
+    fi
     saludo="$(preguntar_helper "$HELPER_SOCKET" '{"op":"ping"}')"
     case "$saludo" in
         *'"ok": true'*) echo "helper: responde al ping" ;;
@@ -362,18 +377,42 @@ else
     [ -z "$malas" ] || fallo "EL HELPER ACTUALIZARIA:$malas"
 
     # Que el socket se vea desde fuera no dice que se vea desde DENTRO, que es
-    # lo que importa: los dos contenedores llegan por group_add y por el bind
-    # mount. Sin esto, el fallo aparece el dia que pulsas el boton.
+    # lo que importa. Los tres errnos de un socket unix quieren decir cosas
+    # distintas y mandan a sitios distintos, asi que se separan igual que se
+    # separan los cuatro casos del lado del host:
+    #   ENOENT        no esta ahi (o no esta montado el directorio)
+    #   EACCES        esta y no tienes permiso: grupo o modo
+    #   ECONNREFUSED  esta y no escucha nadie: el helper caido, o el inodo viejo
     for servicio in homelab-mcp agent; do
-        docker compose exec -T "$servicio" python - <<'SOCK' || fallo "$servicio no alcanza el helper en /run/puente/helper.sock (el motivo, arriba): mira el modo de /run/puente y el HELPER_GID del .env"
-import socket, sys
+        docker compose exec -T -e SERVICIO="$servicio" "$servicio" python - <<'SOCK' || fallo "$servicio no alcanza el helper (el motivo y donde mirar, justo encima)"
+import os
+import socket
+import sys
 
+RUTA = "/run/puente/helper.sock"
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 s.settimeout(10)
 try:
-    s.connect("/run/puente/helper.sock")
-except Exception as exc:
-    sys.exit(f"  {type(exc).__name__}: {exc}")
+    s.connect(RUTA)
+except FileNotFoundError:
+    hay = os.path.isdir(os.path.dirname(RUTA))
+    sys.exit(f"  no existe {RUTA} dentro del contenedor. " + (
+        "El directorio esta montado y vacio: el helper no esta corriendo (systemctl status puente-helper)"
+        if hay else
+        "Ni siquiera hay directorio: HELPER_DIR del .env no apunta a donde deja systemd /run/puente"))
+except PermissionError:
+    sys.exit(f"  sin permiso para usar {RUTA}: el socket es root:puente-helper 0660 y este "
+             f"contenedor esta en los grupos {os.getgroups()}. Revisa HELPER_GID en el .env "
+             f"(getent group puente-helper | cut -d: -f3) y el modo de /run/puente")
+except ConnectionRefusedError:
+    sys.exit(f"  {RUTA} existe y no escucha nadie. O el helper esta parado "
+             f"(systemctl status puente-helper), o este contenedor esta agarrado a un inodo "
+             f"viejo: pasa si se monto el fichero del socket en vez del directorio, o si la "
+             f"unidad no tiene RuntimeDirectoryPreserve=yes. Reinstala el helper y recrea el "
+             f"contenedor (docker compose up -d --force-recreate {os.environ.get('SERVICIO', '')})")
+except NotADirectoryError:
+    sys.exit(f"  /run/puente no es un directorio dentro del contenedor: HELPER_DIR del .env "
+             f"apunta a un fichero")
 s.sendall(b'{"op":"ping"}\n')
 print("  " + s.makefile().readline().strip()[:90])
 SOCK
