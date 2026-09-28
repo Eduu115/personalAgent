@@ -210,10 +210,17 @@ def query_del_briefing() -> None:
             query=settings.query_briefing, pr_dias=settings.briefing_pr_dias
         )
         assert "in:inbox otra-cosa" in prompt and QUERY_BRIEFING not in prompt, "el prompt no coge la configurada"
-        # Y que el briefing pida SOLO las PRs que reclaman algo: un listado de
-        # todas las abiertas cada manana se deja de leer a los tres dias.
+        # Y que el briefing pida SOLO las PRs que reclaman algo. Son cuatro
+        # repos: un listado de todas las abiertas cada manana se deja de leer a
+        # los tres dias, que es como se pierde un briefing.
         assert "dev_prs" in prompt and f"{settings.briefing_pr_dias} días" in prompt, prompt
-        assert "SOLO las que lo necesitan" in prompt
+        for exigencia in (
+            "SOLO las que piden algo",            # el filtro
+            "va bien NO se menciona",             # una abierta ayer y sana, fuera
+            "esta sección no sale",               # sin nada que reclamar, no hay seccion
+            '"sin checks" no es "pasando"',       # y sin CI no se da por bueno
+        ):
+            assert exigencia in prompt, f"al prompt del briefing le falta: {exigencia}"
     finally:
         settings.briefing_query = original
     print(f"OK consulta del briefing desde configuracion: {settings.query_briefing}")

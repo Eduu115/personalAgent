@@ -172,6 +172,73 @@ async def orden_y_errores() -> None:
     print("OK orden: el CI en rojo primero; un repo que falla queda en errores y no tumba la llamada")
 
 
+async def sin_checks_no_es_todo_bien() -> None:
+    """Sin checks no es "pasando": se dice por que, y se distingue el caso.
+
+    Tres de los cuatro repos de Edu no tienen Actions, asi que una lista vacia
+    va a ser lo normal. Devolverla pelada se lee como "todo verde" y no lo es.
+    """
+    base = {
+        "/repos/edu/repo/pulls/7": PR_FALSA,
+        "/repos/edu/repo/commits/abc123/check-runs": {"check_runs": []},
+    }
+    # a) el repo no tiene Actions
+    respuestas({**base, "/repos/edu/repo/actions/workflows": {"total_count": 0}})
+    d = await github.checks("edu/repo", 7)
+    assert d["resumen"] == "sin checks" and d["checks"] == []
+    assert "no tiene ninguna workflow" in d["nota"] and "NO significa que la PR esté bien" in d["nota"], d["nota"]
+
+    # b) tiene Actions, pero no se han disparado con esta PR
+    respuestas({**base, "/repos/edu/repo/actions/workflows": {"total_count": 3}})
+    d = await github.checks("edu/repo", 7)
+    assert "no hay ninguna comprobación para este commit" in d["nota"], d["nota"]
+
+    # c) no se ha podido mirar: tampoco se da por buena
+    respuestas(base)   # la llamada a workflows no esta prevista y revienta
+    d = await github.checks("edu/repo", 7)
+    assert "No se puede decir si la PR está bien" in d["nota"], d["nota"]
+
+    # d) con checks de verdad no hay nota que estorbe
+    respuestas({
+        "/repos/edu/repo/pulls/7": PR_FALSA,
+        "/repos/edu/repo/commits/abc123/check-runs": {"check_runs": [
+            {"name": "tests", "status": "completed", "conclusion": "failure",
+             "output": {"title": "3 fallos"}, "html_url": "x"}]},
+    })
+    d = await github.checks("edu/repo", 7)
+    assert d["resumen"] == "fallando" and d["nota"] is None and d["checks"][0]["nombre"] == "tests"
+    print("OK sin checks: se explica por que en los tres casos, y no estorba cuando los hay")
+
+
+async def caducidad_del_token() -> None:
+    """La fecha sale de la cabecera, y los dias se calculan al preguntar."""
+    from datetime import date, timedelta
+
+    original = github.CADUCA
+    try:
+        github.CADUCA = None
+        assert await github.caducidad() == (None, None), "sin cabecera no se inventa una fecha"
+
+        lejos = (date.today() + timedelta(days=64)).isoformat()
+        github.CADUCA = f"{lejos} 23:59:59 UTC"      # el formato que manda GitHub
+        fecha, dias = await github.caducidad()
+        assert dias == 64, (fecha, dias)
+
+        cerca = (date.today() + timedelta(days=9)).isoformat()
+        github.CADUCA = cerca
+        assert (await github.caducidad())[1] == 9
+
+        caducado = (date.today() - timedelta(days=2)).isoformat()
+        github.CADUCA = caducado
+        assert (await github.caducidad())[1] == -2, "un token caducado tiene que dar negativo"
+
+        github.CADUCA = "cuando sea"
+        assert await github.caducidad() == ("cuando sea", None), "sin entenderla, se devuelve tal cual"
+        print("OK caducidad: cabecera de GitHub, dias calculados al preguntar, y caducado da negativo")
+    finally:
+        github.CADUCA = original
+
+
 def sin_escrituras() -> None:
     """Ninguna llamada de este servidor usa un metodo que no sea GET."""
     fuente = (os.path.dirname(__file__) + "/github.py")
@@ -189,4 +256,6 @@ if __name__ == "__main__":
     asyncio.run(diff_con_secretos())
     asyncio.run(estados())
     asyncio.run(orden_y_errores())
+    asyncio.run(sin_checks_no_es_todo_bien())
+    asyncio.run(caducidad_del_token())
     print("todo OK")
