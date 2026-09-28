@@ -314,7 +314,8 @@ que un job diario vacia el contenido de las filas de mas de 30 dias
   del host **(hecho)**. Falta: eventos de calendario.
 - **F3 — La consola.** Dashboard en la tablet **(hecho: aprobaciones, estado,
   chat, briefing, modo ambient y acciones rapidas con Wake-on-LAN)**. Faltan:
-  Fully Kiosk y Home Assistant.
+  restaurar la ultima conversacion al cargar (ver abajo), Fully Kiosk y
+  Home Assistant.
 - **F4 —** GitHub/PRs, proactividad, voz, 8B local para resumenes de madrugada.
 
 ---
@@ -598,6 +599,19 @@ habia cerrado con `done` antes de la aprobacion, asi que sin esto el unico canal
 para enterarse seria el push al movil, y delante de la pantalla te quedabas sin
 saber si paso algo. Nada de websockets por ahora: sondear dos veces por segundo
 durante dos minutos es mas barato que una capa de tiempo real.
+
+**Pendiente: la consola no restaura el hilo al cargar.** `conversacion` empieza
+en `null` y `#hilo` vacio, asi que una recarga —o cerrar la pestana, o que se
+bloquee la tablet— se lleva la conversacion de la pantalla. Los mensajes estan
+en Postgres desde la F0 y las dos rutas que hacen falta existen ya:
+`GET /api/conversations` (las ultimas, con su titulo) y
+`GET /api/conversations/{id}` (sus mensajes). Falta solo que la pagina pida la
+mas reciente al arrancar, la pinte y se quede con su id para seguir el hilo.
+
+Mientras tanto, la recarga por version nueva se aplaza si hay una conversacion
+a la vista. Eso es una tirita sobre esto: cuando el hilo se restaure, esa espera
+deja de hacer falta en casi todos los casos y la tablet de la pared podra
+recargarse siempre.
 
 El service worker existe solo para que sea instalable y no cachea nada: ademas
 de la frescura, `/api/aprobaciones` devuelve nonces de un solo uso y cachearlos
