@@ -127,18 +127,20 @@ async def set_title_if_empty(conversation_id: UUID, title: str) -> None:
 # ------------------------------------------------------------------ mensajes
 
 
-async def anteponer_a_respuesta(conversation_id: UUID, texto: str) -> None:
-    """Pone `texto` delante de la ultima respuesta del asistente.
+async def reemplazar_respuesta(conversation_id: UUID, texto: str) -> None:
+    """Deja `texto` como ultima respuesta del asistente.
 
-    Para avisos que solo se conocen al acabar: el briefing no sabe hasta el
-    final que parte no pudo consultar, y eso tiene que ir arriba.
+    Para lo que solo se sabe al acabar y no puede depender de que lo escriba el
+    modelo: el briefing no sabe hasta el final que parte no pudo consultar (va
+    arriba) ni cuando fue la ultima comprobacion de la vigilancia (va abajo).
+    Lo guardado tiene que ser exactamente lo que se manda al movil.
     """
     async with pool().connection() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
                 """
                 UPDATE messages
-                   SET content = %s || content
+                   SET content = %s
                  WHERE id = (SELECT max(id) FROM messages
                               WHERE conversation_id = %s AND role = 'assistant')
                 """,
@@ -233,6 +235,20 @@ async def vigilancias() -> dict[str, dict[str, Any]]:
         async with conn.cursor() as cur:
             await cur.execute("SELECT * FROM vigilancias")
             return {f["nombre"]: dict(f) for f in await cur.fetchall()}
+
+
+async def ultima_vigilancia() -> Any:
+    """Cuando vio algo la vigilancia por ultima vez, o None si nunca.
+
+    Sale de `visto_en`, que se toca en cada pasada. No es "cuando corrio el
+    job" sino "cuando midio algo de verdad", que es mejor: una vigilancia que
+    se ejecuta pero no consigue mirar nada tampoco esta vigilando.
+    """
+    async with pool().connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute("SELECT max(visto_en) AS ultima FROM vigilancias")
+            fila = await cur.fetchone()
+            return fila["ultima"] if fila else None
 
 
 async def vigilancia_guardar(

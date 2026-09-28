@@ -78,6 +78,39 @@ def aviso_no_consultado(no_consultado: dict[str, str]) -> str | None:
     return "⚠️ No he podido consultar " + "; ni ".join(partes) + "."
 
 
+async def linea_de_vigilancia() -> tuple[str, bool]:
+    """(linea, esta_muerta). Cierra el circulo de la proactividad.
+
+    Si el job de vigilancia deja de ejecutarse no llega ningun aviso, y eso es
+    exactamente igual que si todo fuera bien. El briefing lo lee todos los dias,
+    asi que basta con que diga cuando fue la ultima comprobacion: el dia que
+    ponga "hace 9 horas", el silencio de la noche deja de significar nada y lo
+    sabes. Ni monitor externo ni heartbeat aparte.
+
+    Si esta parada, la linea sube arriba con los demas avisos en vez de quedarse
+    de ultima, que es donde no la leeria nadie.
+    """
+    ultima = await db.ultima_vigilancia()
+    if ultima is None:
+        return "Vigilancia: no ha corrido ninguna vez todavía.", True
+    minutos = max(0, int((datetime.now(MADRID) - ultima).total_seconds() // 60))
+    # Tres veces su intervalo: con el job cada 5 min, mas de 15 es que no corre.
+    muerta = minutos > max(15, settings.vigilancia_minutos * 3)
+    if minutos < 1:
+        hace = "hace menos de un minuto"
+    elif minutos < 60:
+        hace = f"hace {minutos} min"
+    elif minutos < 60 * 48:
+        hace = f"hace {minutos // 60} h"
+    else:
+        hace = f"hace {minutos // 1440} días"
+    if muerta:
+        return (f"⚠️ La vigilancia no comprueba nada desde {hace} "
+                f"({ultima.astimezone(MADRID):%d/%m %H:%M}): que no haya avisos no significa "
+                "que todo vaya bien. Mira el log del agente."), True
+    return f"Vigilancia: última comprobación {hace}.", False
+
+
 def ultimo_disparo(trigger: CronTrigger, ahora: datetime) -> datetime | None:
     """La ultima hora a la que tocaba el cron, si cae dentro de VENTANA."""
     t = trigger.get_next_fire_time(None, ahora - VENTANA)
@@ -176,12 +209,19 @@ async def lanzar(programado: datetime | None = None) -> dict[str, Any]:
                 no_consultado.setdefault(area, motivo)
 
         aviso = aviso_no_consultado(no_consultado)
-        prefijo = "\n".join(filter(None, [nota_retraso, aviso]))
+        # El latido de la proactividad. Va SIEMPRE y no lo escribe el modelo:
+        # una linea que se puede quedar fuera segun el dia no sirve para
+        # comprobar nada. Si la vigilancia esta parada, sube con los avisos.
+        latido, vigilancia_muerta = await linea_de_vigilancia()
+        prefijo = "\n".join(filter(None, [nota_retraso, aviso, latido if vigilancia_muerta else ""]))
         if not error and not respuesta:
             error = "el modelo no ha devuelto texto"
-        elif not error and prefijo:
-            await db.anteponer_a_respuesta(conversation_id, prefijo + "\n\n")
-            respuesta = f"{prefijo}\n\n{respuesta}"
+        elif not error:
+            if not vigilancia_muerta:
+                respuesta = f"{respuesta.rstrip()}\n\n— {latido}"
+            if prefijo:
+                respuesta = f"{prefijo}\n\n{respuesta}"
+            await db.reemplazar_respuesta(conversation_id, respuesta)
             if aviso and set(_AREAS) <= set(no_consultado):
                 # Nada que contar: un briefing vacio no, el aviso de fallo.
                 error = aviso

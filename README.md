@@ -434,6 +434,12 @@ Llamarla dos veces seguidas no manda dos avisos: eso es justo lo que se intenta
 evitar. **No arregla nada**: solo llama a herramientas de lectura, y el atajo
 que usa rechaza cualquier otra cosa.
 
+**Y quien vigila al vigilante**: el briefing de las 7:30 termina con una linea
+que dice cuando fue la ultima comprobacion. Si un dia pone "hace 9 horas", el
+silencio de la noche deja de significar "todo bien" y lo sabes. Cuando lleva mas
+de 15 minutos parada, esa linea sube al principio del briefing con los demas
+avisos.
+
 ## Aprobaciones: las herramientas que escriben
 
 `mail_borrador` y `lab_reiniciar` no se ejecutan solas. Cuando el modelo pide
