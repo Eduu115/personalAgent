@@ -495,8 +495,18 @@ una MAC por parametro. El porque, en `CLAUDE.md`.
 sudo ./scripts/instalar_helper.sh
 ```
 
+**Tu usuario tiene que estar en el grupo `puente-helper`**: `deploy.sh` habla
+con el socket del helper como tu, no como root.
+
+```bash
+sudo usermod -aG puente-helper $USER   # y cierra sesion y vuelve a entrar
+```
+
+Los grupos se leen al iniciar sesion, asi que en la misma shell donde lo
+ejecutas no valdra todavia. El instalador comprueba si estas y lo dice.
+
 Dice todo lo que va a hacer y pregunta antes de tocar nada: crea el grupo
-`puente-helper`, copia el helper a `/usr/local/lib/puente/`, crea
+`puente-helper` (o lo reutiliza con sus miembros si ya existe), copia el helper a `/usr/local/lib/puente/`, crea
 `/etc/puente/stacks.conf` y `/etc/puente/equipos.conf` (root, 600) e instala y
 arranca la unidad de systemd. Al acabar te dice el `HELPER_GID` que tienes que
 poner en el `.env`.
@@ -574,6 +584,13 @@ sudo ./scripts/instalar_helper.sh --desinstalar
 Desinstalar para el servicio y borra la unidad y el helper, pero **deja**
 `/etc/puente/stacks.conf` y el grupo, por si vuelves a instalarlo. Para quitar
 tambien eso: `sudo rm -rf /etc/puente && sudo groupdel puente-helper`.
+
+⚠️ **Ese `groupdel` se lleva por delante a los miembros del grupo.** Si luego
+reinstalas, el instalador crea un grupo nuevo y vacio: el socket queda perfecto
+y `deploy.sh` empieza a fallar con "sin permiso". Tendras que volver a anadirte
+(`sudo usermod -aG puente-helper $USER` y cerrar sesion). El instalador avisa
+cuando el grupo que crea es nuevo, precisamente por esto. Reinstalar **sin**
+borrar el grupo no toca a sus miembros.
 
 `deploy.sh` comprueba en cada despliegue que el socket existe con los permisos
 esperados, que responde, que rechaza un stack que no conoce y que **rechaza
