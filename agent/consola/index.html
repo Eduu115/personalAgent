@@ -10,182 +10,359 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <style>
-/* La tablet es horizontal y fija: se disena para eso y el movil es la version
-   reducida, no al reves. */
+/* Puente de mando. Una consola de guardia: callada mientras no pase nada, y
+   legible desde el otro lado de la habitacion cuando pasa.
+
+   Tres reglas que mandan sobre el resto:
+   - Todo el tamano de letra va en rem sobre el tamano base del navegador, para
+     que siga al ajuste de texto del sistema. Con px no lo sigue.
+   - Nada se dice solo con color: al lado de cada color hay una palabra.
+   - El unico sitio con color saturado es lo que reclama algo. Si no reclama
+     nada, la pantalla es gris entera, y eso es informacion. */
+
 :root {
-  --fondo: #0f1216; --panel: #161b22; --borde: #232a33; --texto: #e6edf3;
-  --suave: #93a1b1; --ok: #3fb950; --mal: #f85149; --ojo: #d29922; --acento: #7dd3fc;
+  color-scheme: dark;
+  /* Superficies e tinta. Contrastes medidos sobre --base y --alza:
+     tinta 16.99 / 15.50 · tenue 8.07 / 7.36 · acento 9.09 / 8.29
+     ok 10.11 / 9.23 · ojo 11.57 / 10.55 · mal 6.84 / 6.24  (minimo 4.5) */
+  --base: #101014;
+  --alza: #1a1a20;
+  --hueco: #0a0a0d;
+  /* La linea que agrupa esta en 2.97:1 sobre la base a proposito: un borde de
+     1.2:1 no se ve a tres metros, y agrupar es la mitad del trabajo aqui. */
+  --linea: #5e5e6b;
+  --pelo: #2a2a33;
+  --tinta: #f2f2f5;
+  --tenue: #a8a8b4;
+  --acento: #8ab4ff;
+  --ok: #5fd38d;
+  --ojo: #ffbf47;
+  --mal: #ff6b6b;
+  --tapiz-mal: #2a1416;
+  --tapiz-ok: #10241a;
+
+  /* Escala. 1rem = lo que diga el navegador (16 px por defecto), asi que todo
+     esto crece con el ajuste del sistema. El cuerpo va a 17 px equivalentes,
+     que es el tamano por defecto de iOS; el minimo de la escala es 12.75. */
+  --t-xs: 0.8rem;
+  --t-s: 0.9375rem;
+  --t-m: 1.0625rem;
+  --t-l: 1.3125rem;
+  --t-xl: 1.75rem;
+  --numeros: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+
+  --r: 12px;
+  --toque: 44px;   /* zona tactil minima: esto se usa con el dedo */
 }
+
+/* Apariencia clara para el movil a pleno sol. No hay interruptor dentro de la
+   consola: manda el ajuste del sistema, que es donde la gente lo busca.
+   Contrastes: tinta 16.19 · tenue 6.34 · acento 5.48 · ok 5.07 · ojo 5.65 · mal 5.23 */
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --base: #f7f7f9; --alza: #ffffff; --hueco: #eeeef2;
+    --linea: #8d8d9e; --pelo: #dcdce4;
+    --tinta: #1a1a20; --tenue: #5a5a68;
+    --acento: #2b5bd7; --ok: #0f7a3d; --ojo: #8a5800; --mal: #c0332b;
+    --tapiz-mal: #fdeceb; --tapiz-ok: #eaf6ee;
+  }
+}
+
+/* Mas contraste cuando el sistema lo pide. */
+@media (prefers-contrast: more) {
+  :root { --tenue: var(--tinta); --linea: var(--tinta); --pelo: var(--linea); }
+}
+
 * { box-sizing: border-box; }
+
+html { font-size: 100%; }   /* el ancla de toda la escala: no tocar */
+
 body {
-  margin: 0; height: 100vh; overflow: hidden; background: var(--fondo); color: var(--texto);
-  font: 15px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  display: grid; grid-template-rows: auto 1fr; padding-top: env(safe-area-inset-top);
+  margin: 0; min-height: 100vh; background: var(--base); color: var(--tinta);
+  font: var(--t-m)/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  display: grid; grid-template-rows: auto auto 1fr;
+  padding-top: env(safe-area-inset-top);
+  -webkit-text-size-adjust: 100%;
 }
+
+/* Foco visible: el portatil es un cliente de esto y sin esto no se puede usar
+   con el teclado. Va en :focus-visible para no ensuciar el uso con el dedo. */
+:focus-visible {
+  outline: 3px solid var(--acento);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ------------------------------------------------------------ cabecera */
+
 header {
   display: flex; align-items: center; gap: 12px; padding: 10px 16px;
-  border-bottom: 1px solid var(--borde); background: var(--panel);
+  border-bottom: 1px solid var(--pelo);
 }
-header h1 { font-size: 16px; margin: 0; font-weight: 600; letter-spacing: .3px; }
-#reloj { margin-left: auto; color: var(--suave); font-variant-numeric: tabular-nums; }
-.punto { width: 9px; height: 9px; border-radius: 50%; background: var(--suave); }
-.punto.ok { background: var(--ok); } .punto.mal { background: var(--mal); }
+header h1 {
+  font-size: var(--t-s); margin: 0; font-weight: 600; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--tenue);
+}
+#reloj { margin-left: auto; color: var(--tenue); font-variant-numeric: tabular-nums; font-family: var(--numeros); }
+/* El estado de la conexion lleva palabra, no solo un punto de color. */
+#enlace { display: flex; align-items: center; gap: 6px; font-size: var(--t-xs); color: var(--tenue); }
+.punto { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; }
+#enlace.mal { color: var(--mal); }
 
-main { display: grid; grid-template-columns: 1.15fr 1fr 1.25fr; gap: 12px; padding: 12px; min-height: 0; }
-section { background: var(--panel); border: 1px solid var(--borde); border-radius: 10px; display: flex; flex-direction: column; min-height: 0; }
-section > h2 {
-  font-size: 12px; text-transform: uppercase; letter-spacing: .8px; color: var(--suave);
-  margin: 0; padding: 12px 14px 8px; display: flex; gap: 8px; align-items: center;
+/* ------------------------------------------------------ la linea de guardia */
+/* La pieza central. Dice en una frase si algo te reclama, con lo mismo que
+   decidiria mandarte un push: asi el silencio de la pantalla y el del movil
+   significan lo mismo. Cuando no reclama nada, es gris y lo dice. */
+
+#guardia {
+  display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  padding: 14px 16px; border-bottom: 1px solid var(--pelo);
+  font-size: var(--t-l); line-height: 1.3;
 }
-section > h2 .cuenta { background: var(--borde); border-radius: 10px; padding: 1px 8px; color: var(--texto); }
+#guardia .que { font-weight: 620; }
+#guardia .desde { font-size: var(--t-s); color: var(--tenue); font-family: var(--numeros); }
+#guardia.calma { color: var(--tenue); }
+#guardia.calma .que { font-weight: 500; color: var(--tinta); }
+#guardia.reclama { background: var(--tapiz-mal); border-bottom-color: var(--mal); }
+#guardia.reclama .que { color: var(--mal); }
+
+/* ------------------------------------------------------------ estructura */
+
+main { display: grid; gap: 12px; padding: 12px; min-height: 0; }
+@media (min-width: 60rem) {
+  body { height: 100vh; overflow: hidden; }
+  main { grid-template-columns: 1.1fr 1fr 1.2fr; }
+}
+section {
+  background: var(--alza); border: 1px solid var(--pelo); border-radius: var(--r);
+  display: flex; flex-direction: column; min-height: 0;
+}
+section > h2, .pestanas {
+  font-size: var(--t-xs); text-transform: uppercase; letter-spacing: .07em; color: var(--tenue);
+  margin: 0; padding: 12px 14px 8px; display: flex; gap: 8px; align-items: center; font-weight: 600;
+}
+.cuenta {
+  background: var(--hueco); border: 1px solid var(--pelo); border-radius: 999px;
+  padding: 1px 9px; color: var(--tinta); font-family: var(--numeros);
+}
 .cuerpo { overflow-y: auto; padding: 0 14px 14px; flex: 1; min-height: 0; }
-.vacio { color: var(--suave); padding: 18px 2px; }
+.vacio { color: var(--tenue); padding: 18px 2px; font-size: var(--t-s); }
 
-/* --- aprobaciones --- */
-.ficha { border: 1px solid var(--borde); border-radius: 10px; padding: 12px; margin-bottom: 10px; background: #12171e; }
-.ficha.sensitive { border-left: 3px solid var(--ojo); }
+/* ------------------------------------------------------------ aprobaciones */
+
+.ficha {
+  border: 1px solid var(--pelo); border-left: 3px solid var(--linea);
+  border-radius: var(--r); padding: 12px; margin-bottom: 10px; background: var(--base);
+}
+.ficha.sensitive { border-left-color: var(--ojo); }
 .ficha .nombre { font-weight: 600; }
-.ficha .riesgo { font-size: 11px; color: var(--suave); text-transform: uppercase; letter-spacing: .6px; }
+.ficha .riesgo {
+  font-size: var(--t-xs); color: var(--tenue); text-transform: uppercase; letter-spacing: .06em;
+}
 .ficha .pasa { margin: 8px 0; }
 .ficha pre {
-  background: #0d1117; border: 1px solid var(--borde); border-radius: 8px; padding: 8px;
-  margin: 8px 0; font-size: 12.5px; white-space: pre-wrap; word-break: break-word; max-height: 190px; overflow: auto;
+  background: var(--hueco); border: 1px solid var(--pelo); border-radius: 8px; padding: 8px;
+  margin: 8px 0; font-size: var(--t-s); font-family: var(--numeros);
+  white-space: pre-wrap; word-break: break-word; max-height: 12rem; overflow: auto;
 }
-.queda { color: var(--suave); font-variant-numeric: tabular-nums; }
-.queda.poco { color: var(--ojo); }
+.queda { color: var(--tenue); font-family: var(--numeros); font-size: var(--t-s); }
+.queda.poco { color: var(--ojo); font-weight: 600; }
 .botones { display: flex; gap: 8px; margin-top: 10px; }
-button {
-  font: inherit; border-radius: 8px; border: 1px solid var(--borde); background: #1d242d; color: var(--texto);
-  padding: 10px 14px; cursor: pointer; min-height: 44px; flex: 1;
-}
-button:hover:not(:disabled) { border-color: var(--acento); }
-button:disabled { opacity: .55; cursor: default; }
-button.si { background: #17351f; border-color: #2b5a34; }
-button.no { background: #35191a; border-color: #5a2b2b; }
-.resuelta { color: var(--suave); padding-top: 8px; }
-.resuelta.esperando::after {
-  content: ""; display: inline-block; width: 8px; height: 8px; margin-left: 6px; border-radius: 50%;
-  background: var(--acento); animation: latido 1.2s ease-in-out infinite;
-}
+.resuelta { color: var(--tenue); padding-top: 8px; font-size: var(--t-s); }
 .resuelta.fallo { color: var(--ojo); }
-@keyframes latido { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
 
-/* --- estado --- */
-.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
-.tile { border: 1px solid var(--borde); border-left: 3px solid var(--suave); border-radius: 8px; padding: 8px 10px; background: #12171e; }
-.tile.ok { border-left-color: var(--ok); } .tile.mal { border-left-color: var(--mal); }
-.tile.ojo { border-left-color: var(--ojo); } .tile.off { opacity: .55; }
-.tile .n { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tile .e { font-size: 12px; color: var(--suave); }
-.grupo {
-  display: flex; justify-content: space-between; align-items: baseline; margin: 12px 0 6px;
-  font-size: 11px; text-transform: uppercase; letter-spacing: .7px; color: var(--suave);
+/* ------------------------------------------------------------ controles */
+
+button {
+  font: inherit; font-size: var(--t-s); border-radius: 10px;
+  border: 1px solid var(--linea); background: var(--alza); color: var(--tinta);
+  padding: 10px 14px; cursor: pointer; min-height: var(--toque); flex: 1;
 }
-.grupo .malos { color: var(--ojo); }
-.medidas { margin: 14px 0 6px; }
-.barra { height: 8px; background: #0d1117; border-radius: 5px; overflow: hidden; margin: 4px 0 10px; }
-.barra > div { height: 100%; background: var(--acento); }
-.barra > div.alta { background: var(--ojo); } .barra > div.critica { background: var(--mal); }
-.etiqueta { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--suave); }
+button:hover:not(:disabled) { background: var(--hueco); }
+button:active:not(:disabled) { transform: translateY(1px); }
+button:disabled { opacity: .5; cursor: default; }
+button.si { background: var(--tapiz-ok); border-color: var(--ok); }
+button.no { background: var(--tapiz-mal); border-color: var(--mal); }
 
-/* --- chat --- */
-#hilo { display: flex; flex-direction: column; gap: 8px; }
-.msg { padding: 9px 12px; border-radius: 10px; max-width: 92%; white-space: pre-wrap; word-wrap: break-word; }
-.msg.yo { background: #1d3040; align-self: flex-end; }
-.msg.el { background: #12171e; border: 1px solid var(--borde); align-self: flex-start; }
-.evento { font-size: 12.5px; color: var(--suave); align-self: flex-start; padding-left: 2px; }
-.evento.aviso { color: var(--ojo); }
-.evento.error { color: var(--mal); }
-form { display: flex; gap: 8px; padding: 10px 14px 14px; border-top: 1px solid var(--borde); }
-textarea {
-  flex: 1; resize: none; font: inherit; background: #0d1117; color: var(--texto);
-  border: 1px solid var(--borde); border-radius: 8px; padding: 10px; min-height: 46px; max-height: 120px;
-}
-form button { flex: 0 0 auto; }
-
-/* --- pestanas de la tercera columna: chat y briefing comparten sitio --- */
-.pestanas { padding-right: 8px; }
+/* Pestanas: son navegacion, asi que se pulsan con el dedo como todo lo demas.
+   Antes median 25 px de alto, por debajo del minimo de 28. */
+.pestanas { padding-right: 8px; gap: 4px; }
 button.pestana {
-  flex: 0 0 auto; min-height: 0; padding: 4px 10px; font-size: 12px; text-transform: uppercase;
-  letter-spacing: .8px; color: var(--suave); background: none; border-color: transparent;
+  flex: 0 0 auto; min-height: var(--toque); padding: 6px 12px; font-size: var(--t-xs);
+  text-transform: uppercase; letter-spacing: .07em; font-weight: 600;
+  color: var(--tenue); background: none; border-color: transparent; border-radius: 8px;
 }
-button.pestana.activa { color: var(--texto); background: #1d242d; border-color: var(--borde); }
+button.pestana.activa { color: var(--tinta); background: var(--hueco); border-color: var(--pelo); }
+
 .panel { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .panel.oculto { display: none; }
 
-/* --- briefing --- */
-.sello { font-size: 17px; font-weight: 600; margin: 4px 0 2px; }
-.sello + .desde { color: var(--suave); font-size: 12.5px; margin-bottom: 10px; }
+/* ------------------------------------------------------------ estado */
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: 8px; }
+.tile {
+  border: 1px solid var(--pelo); border-left: 3px solid var(--linea);
+  border-radius: 8px; padding: 8px 10px; background: var(--base);
+}
+.tile.ok { border-left-color: var(--ok); }
+.tile.mal { border-left-color: var(--mal); background: var(--tapiz-mal); }
+.tile.ojo { border-left-color: var(--ojo); }
+.tile.off { opacity: .6; }
+.tile .n { font-size: var(--t-s); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* El estado va escrito, no solo en el color del borde. Antes el detalle vivia
+   en un title=, que con el dedo no se ve y un lector de pantalla no lee. */
+.tile .e { font-size: var(--t-xs); color: var(--tenue); }
+.grupo {
+  display: flex; justify-content: space-between; align-items: baseline; margin: 14px 0 6px;
+  font-size: var(--t-xs); text-transform: uppercase; letter-spacing: .07em; color: var(--tenue); font-weight: 600;
+}
+.grupo .malos { color: var(--ojo); }
+.medidas { margin: 16px 0 6px; }
+.barra { height: 10px; background: var(--hueco); border: 1px solid var(--pelo); border-radius: 5px; overflow: hidden; margin: 4px 0 10px; }
+.barra > div { height: 100%; background: var(--acento); }
+.barra > div.alta { background: var(--ojo); }
+.barra > div.critica { background: var(--mal); }
+.etiqueta { display: flex; justify-content: space-between; font-size: var(--t-s); color: var(--tenue); gap: 10px; }
+.etiqueta b { font-family: var(--numeros); font-weight: 600; color: var(--tinta); font-variant-numeric: tabular-nums; }
+
+/* ------------------------------------------------------------ chat */
+
+#hilo { display: flex; flex-direction: column; gap: 8px; }
+.msg { padding: 10px 12px; border-radius: var(--r); max-width: 92%; white-space: pre-wrap; word-wrap: break-word; }
+.msg.yo { background: var(--hueco); border: 1px solid var(--pelo); align-self: flex-end; }
+.msg.el { background: var(--base); border: 1px solid var(--pelo); align-self: flex-start; }
+.evento { font-size: var(--t-s); color: var(--tenue); align-self: flex-start; padding-left: 2px; }
+.evento.aviso { color: var(--ojo); }
+.evento.error { color: var(--mal); }
+form { display: flex; gap: 8px; padding: 10px 14px 14px; border-top: 1px solid var(--pelo); }
+textarea {
+  flex: 1; resize: none; font: inherit; background: var(--hueco); color: var(--tinta);
+  border: 1px solid var(--linea); border-radius: 10px; padding: 10px;
+  min-height: var(--toque); max-height: 8rem;
+}
+form button { flex: 0 0 auto; }
+
+/* ------------------------------------------------------------ briefing */
+
+.sello { font-size: var(--t-l); font-weight: 620; margin: 4px 0 2px; }
+.sello + .desde { color: var(--tenue); font-size: var(--t-s); margin-bottom: 10px; font-family: var(--numeros); }
 .resumen { white-space: pre-wrap; word-wrap: break-word; }
-.sin-push { color: var(--ojo); font-size: 12.5px; margin-top: 8px; }
-details { border-top: 1px solid var(--borde); padding: 8px 0; }
-details summary { cursor: pointer; color: var(--suave); font-size: 13px; }
-details .resumen { margin-top: 8px; font-size: 13.5px; color: var(--suave); }
-.pie { padding: 10px 14px 14px; border-top: 1px solid var(--borde); }
-button.generar { background: none; border-style: dashed; color: var(--suave); font-size: 13px; width: 100%; }
+.sin-push { color: var(--ojo); font-size: var(--t-s); margin-top: 8px; }
+details { border-top: 1px solid var(--pelo); padding: 8px 0; }
+details summary { cursor: pointer; color: var(--tenue); font-size: var(--t-s); min-height: var(--toque); display: flex; align-items: center; }
+details .resumen { margin-top: 8px; font-size: var(--t-s); color: var(--tenue); }
+.pie { padding: 10px 14px 14px; border-top: 1px solid var(--pelo); }
+button.generar { background: none; border-style: dashed; color: var(--tenue); width: 100%; }
 button.generar.armado { border-style: solid; border-color: var(--ojo); color: var(--ojo); }
 
-/* --- acciones: botones para el dedo, tablet vertical de pared --- */
-.rejilla { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 12px; }
+/* ------------------------------------------------------------ acciones */
+
+.rejilla { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: 12px; }
 button.accion {
-  flex: none; min-height: 104px; padding: 16px; font-size: 17px; font-weight: 600;
+  flex: none; min-height: 6.5rem; padding: 16px; font-size: var(--t-m); font-weight: 600;
   display: flex; flex-direction: column; align-items: flex-start; gap: 6px; text-align: left;
 }
-button.accion .sub { font-size: 12.5px; font-weight: 400; color: var(--suave); white-space: normal; }
-button.accion.hecho { background: #17351f; border-color: #2b5a34; }
+button.accion .sub { font-size: var(--t-s); font-weight: 400; color: var(--tenue); white-space: normal; }
+button.accion.hecho { background: var(--tapiz-ok); border-color: var(--ok); }
 button.accion.hecho .sub { color: var(--ok); }
-button.accion.fallo { background: #35191a; border-color: #5a2b2b; }
+button.accion.fallo { background: var(--tapiz-mal); border-color: var(--mal); }
 button.accion.fallo .sub { color: var(--mal); }
 
-/* --- ambient: se lee desde el otro lado de la habitacion --- */
+/* --------------------------------------------------- barra de pestanas movil */
+/* En el movil todo se apilaba en un scroll unico sin forma de saltar: para ver
+   una aprobacion habia que pasar por delante del estado entero. */
+
+#barra { display: none; }
+@media (max-width: 59.99rem) {
+  body { grid-template-rows: auto auto 1fr auto; }
+  main > section { display: none; }
+  main > section.activa { display: flex; }
+  #barra {
+    display: grid; grid-auto-flow: column; gap: 4px;
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--pelo); background: var(--alza);
+    position: sticky; bottom: 0;
+  }
+  #barra button {
+    min-height: var(--toque); font-size: var(--t-xs); text-transform: uppercase; letter-spacing: .05em;
+    background: none; border-color: transparent; color: var(--tenue); font-weight: 600;
+  }
+  #barra button.activa { color: var(--acento); background: var(--hueco); border-color: var(--pelo); }
+  #barra .aguja { display: block; font-family: var(--numeros); font-size: var(--t-s); color: var(--mal); }
+}
+
+/* ------------------------------------------------------------ ambient */
+
 #ambient { display: none; }
-body.ambiente header, body.ambiente main { display: none; }
+body.ambiente header, body.ambiente main, body.ambiente #barra, body.ambiente #guardia { display: none; }
 body.ambiente #ambient {
   display: grid; grid-template-rows: auto 1fr auto; gap: 2vh;
-  position: fixed; inset: 0; z-index: 20; background: var(--fondo); padding: 4vh 4vw;
+  position: fixed; inset: 0; z-index: 20; background: var(--base); padding: 4vh 4vw;
 }
-.a-cabecera { display: flex; align-items: baseline; justify-content: space-between; color: var(--suave); font-size: clamp(13px, 2.2vw, 34px); }
-#a-reloj { color: var(--texto); font-size: clamp(22px, 4vw, 64px); font-variant-numeric: tabular-nums; line-height: 1; }
+.a-cabecera { display: flex; align-items: baseline; justify-content: space-between; color: var(--tenue); font-size: clamp(0.9rem, 2.2vw, 2rem); }
+#a-reloj { color: var(--tinta); font-size: clamp(1.4rem, 4vw, 4rem); font-family: var(--numeros); font-variant-numeric: tabular-nums; line-height: 1; }
 .a-centro { display: flex; flex-direction: column; justify-content: center; gap: 2.4vh; min-height: 0; overflow: hidden; }
 .a-bloque { display: flex; flex-direction: column; gap: .6vh; }
-.a-titulo { font-size: clamp(22px, 4.4vw, 74px); font-weight: 650; line-height: 1.1; }
+.a-titulo { font-size: clamp(1.4rem, 4.4vw, 4.6rem); font-weight: 650; line-height: 1.1; }
 .a-bloque.urgente .a-titulo { color: var(--ojo); }
 .a-bloque.roto .a-titulo { color: var(--mal); }
 .a-bloque.calma .a-titulo { color: var(--ok); }
-.a-detalle { font-size: clamp(15px, 2.4vw, 38px); color: var(--suave); }
-.a-detalle .queda { color: var(--ojo); }
+.a-detalle { font-size: clamp(0.95rem, 2.4vw, 2.4rem); color: var(--tenue); }
+.a-detalle .queda { color: var(--ojo); font-size: inherit; }
 .a-pie { display: flex; flex-direction: column; gap: 1vh; }
-.a-cifras { display: flex; gap: 6vw; font-size: clamp(15px, 2.6vw, 40px); font-variant-numeric: tabular-nums; }
+.a-cifras { display: flex; gap: 6vw; font-size: clamp(0.95rem, 2.6vw, 2.5rem); font-family: var(--numeros); font-variant-numeric: tabular-nums; }
 .a-cifras b { font-weight: 650; }
-.a-cifras .alta { color: var(--ojo); } .a-cifras .critica { color: var(--mal); }
-.a-briefing { color: var(--suave); font-size: clamp(12px, 1.9vw, 28px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.a-cifras .alta { color: var(--ojo); }
+.a-cifras .critica { color: var(--mal); }
+.a-briefing { color: var(--tenue); font-size: clamp(0.75rem, 1.9vw, 1.8rem); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-@media (max-width: 900px) {
-  body { overflow: auto; height: auto; min-height: 100vh; }
-  main { grid-template-columns: 1fr; height: auto; }
-  section { max-height: 80vh; }
+/* --------------------------------------------------------------- movimiento */
+/* El unico movimiento de la consola es el latido de "ejecutando", y ademas
+   nunca es lo unico que lo dice: al lado hay una palabra. Con Reduce Motion
+   se queda quieto y la palabra sigue estando. */
+
+.resuelta.esperando::after {
+  content: ""; display: inline-block; width: 8px; height: 8px; margin-left: 6px;
+  border-radius: 50%; background: var(--acento); animation: latido 1.2s ease-in-out infinite;
+}
+@keyframes latido { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+  .resuelta.esperando::after { opacity: 1; }
+  button:active:not(:disabled) { transform: none; }
 }
 </style>
 </head>
 <body>
 <header>
-  <span class="punto" id="pulso"></span>
   <h1>Puente de mando</h1>
-  <span id="reloj"></span>
+  <!-- El estado del enlace lleva palabra ademas del color: un punto verde o
+       rojo de 8 px no dice nada a quien no distingue los dos. -->
+  <span id="enlace" role="status"><span class="punto"></span><span id="enlace-texto">Conectando…</span></span>
+  <span id="reloj" aria-label="Hora"></span>
 </header>
 
+<!-- La linea de guardia: lo que la vigilancia habria avisado, en una frase.
+     Si no reclama nada, lo dice y se queda gris. aria-live para que un lector
+     de pantalla cante el cambio sin tener que ir a buscarlo. -->
+<div id="guardia" class="calma" role="status" aria-live="polite">
+  <span class="que">Cargando…</span>
+</div>
+
 <main>
-  <section>
-    <h2>Aprobaciones <span class="cuenta" id="n-aprob">0</span></h2>
+  <section id="v-aprobaciones" class="activa" aria-labelledby="t-aprob">
+    <h2 id="t-aprob">Aprobaciones <span class="cuenta" id="n-aprob">0</span></h2>
     <div class="cuerpo" id="aprobaciones"><p class="vacio">Cargando…</p></div>
   </section>
 
-  <section>
-    <h2>Estado <span class="cuenta" id="n-cont">—</span></h2>
+  <section id="v-estado" aria-labelledby="t-estado">
+    <h2 id="t-estado">Estado <span class="cuenta" id="n-cont">—</span></h2>
     <div class="cuerpo" id="estado"><p class="vacio">Cargando…</p></div>
   </section>
 
-  <section>
+  <section id="v-chat" aria-label="Chat, briefing y acciones">
     <h2 class="pestanas">
       <button class="pestana activa" data-panel="chat">Chat</button>
       <button class="pestana" data-panel="briefing">Briefing</button>
@@ -211,6 +388,14 @@ body.ambiente #ambient {
   </section>
 </main>
 
+<!-- En pantalla estrecha, las tres columnas se convierten en tres destinos y
+     esto es la navegacion. Con el dedo: 44 px de alto y con etiqueta. -->
+<nav id="barra" aria-label="Secciones">
+  <button data-vista="v-aprobaciones" class="activa">Aprobaciones<span class="aguja" id="aguja-aprob"></span></button>
+  <button data-vista="v-estado">Estado<span class="aguja" id="aguja-estado"></span></button>
+  <button data-vista="v-chat">Chat</button>
+</nav>
+
 <!-- Ambient: tras 3 min sin tocar nada. Solo saca a la superficie lo que te
      reclama, y si no hay nada que reclame lo dice sin ambiguedad. -->
 <div id="ambient">
@@ -230,7 +415,12 @@ const crear = (etiqueta, clase, texto) => {
   if (texto !== undefined) e.textContent = texto;   // textContent: nada de HTML de fuera
   return e;
 };
-const pulso = (bien) => $("#pulso").className = "punto " + (bien ? "ok" : "mal");
+function pulso(bien) {
+  // Palabra ademas de color: el punto solo no dice nada a quien no distingue
+  // el verde del rojo, y esto es lo que avisa de que la pagina se quedo sola.
+  $("#enlace").className = bien ? "" : "mal";
+  $("#enlace-texto").textContent = bien ? "En línea" : "Sin conexión con el agente";
+}
 
 // ---------------------------------------------------------------- aprobaciones
 let pendientes = [];
@@ -365,6 +555,8 @@ async function cargarAprobaciones() {
     pulso(false);
   }
   pintarAprobaciones();
+  pintarGuardia();
+  pintarAgujas();
   if (ambiente) pintarAmbient();
 }
 
@@ -379,7 +571,7 @@ function claseSalud(c) {
 
 function barra(caja, titulo, usado, total, unidad, pct) {
   const etiqueta = crear("div", "etiqueta");
-  etiqueta.append(crear("span", null, titulo), crear("span", null, `${usado} / ${total} ${unidad} (${pct}%)`));
+  etiqueta.append(crear("span", null, titulo), crear("b", null, `${usado} / ${total} ${unidad} · ${pct}%`));
   const barra = crear("div", "barra");
   const relleno = crear("div", pct > 90 ? "critica" : pct > 75 ? "alta" : "");
   relleno.style.width = Math.min(100, pct) + "%";
@@ -449,6 +641,7 @@ async function cargarEstado() {
     return;
   }
   datosEstado = datos;
+  pintarAgujas();
   if (ambiente) pintarAmbient();
   caja.replaceChildren();
   $("#n-cont").textContent = `${datos.docker.en_marcha}/${datos.docker.contenedores}`;
@@ -473,8 +666,9 @@ async function cargarEstado() {
     const tiles = crear("div", "tiles");
     for (const c of grupo.slice(0, 60)) {
       const t = crear("div", "tile " + claseSalud(c));
-      t.append(crear("div", "n", c.nombre), crear("div", "e", c.salud || c.estado));
-      t.title = `${c.imagen} — ${c.detalle}`;
+      // El detalle va escrito. Antes vivia en un title=, que con el dedo no se
+      // abre nunca y un lector de pantalla no lo lee.
+      t.append(crear("div", "n", c.nombre), crear("div", "e", c.detalle || c.salud || c.estado));
       tiles.append(t);
     }
     caja.append(cabecera, tiles);
@@ -489,7 +683,7 @@ async function cargarEstado() {
   }
   const carga = datos.host.carga;
   const linea = crear("div", "etiqueta");
-  linea.append(crear("span", null, "Carga"), crear("span", null, `${carga.load_1m} (${carga.carga_por_nucleo_1m}/núcleo)`));
+  linea.append(crear("span", null, "Carga"), crear("b", null, `${carga.load_1m} · ${carga.carga_por_nucleo_1m}/núcleo`));
   medidas.append(linea);
   caja.append(medidas);
 }
@@ -919,13 +1113,80 @@ async function lanzarAccion(accion, boton) {
   setTimeout(() => { caraDelBoton(boton, accion, accion.detalle); boton.disabled = soloLectura; }, 15000);
 }
 
+// ---------------------------------------------------------------- guardia
+// La pieza de arriba. Dice lo MISMO que decidiria mandarte un push, porque lee
+// la misma tabla: asi el silencio de la pantalla y el del movil significan lo
+// mismo. Si no hay nada que reclame, lo dice y se calla, que es el punto.
+
+let loQueReclama = [];
+
+async function cargarVigilancia() {
+  try {
+    const r = await fetch("/api/vigilancia");
+    loQueReclama = (await r.json()).mal || [];
+  } catch (e) {
+    loQueReclama = null;   // no es lo mismo "nada reclama" que "no he podido mirar"
+  }
+  pintarGuardia();
+  if (ambiente) pintarAmbient();
+}
+
+function pintarGuardia() {
+  const caja = $("#guardia");
+  caja.replaceChildren();
+  const esperando = pendientes.length;
+
+  if (esperando) {
+    caja.className = "reclama";
+    caja.append(crear("span", "que", esperando === 1
+      ? "1 aprobación esperando tu OK" : `${esperando} aprobaciones esperando tu OK`),
+      crear("span", "desde", pendientes.map((p) => p.herramienta).join(" · ")));
+    return;
+  }
+  if (loQueReclama === null) {
+    caja.className = "calma";
+    caja.append(crear("span", "que", "No se puede leer la vigilancia"),
+                crear("span", "desde", "el silencio de aquí no significa nada ahora mismo"));
+    return;
+  }
+  if (loQueReclama.length) {
+    caja.className = "reclama";
+    const [primero, ...resto] = loQueReclama;
+    caja.append(crear("span", "que", primero.detalle || primero.nombre),
+                crear("span", "desde", `desde ${hace(primero.desde)}` + (resto.length ? ` · y ${resto.length} más` : "")));
+    return;
+  }
+  caja.className = "calma";
+  caja.append(crear("span", "que", "Todo en orden"),
+              crear("span", "desde", "nada reclama tu atención"));
+}
+
+// ------------------------------------------------------- navegacion movil
+// En ancho de movil las columnas son destinos, no columnas.
+for (const boton of document.querySelectorAll("#barra button")) {
+  boton.onclick = () => {
+    for (const otro of document.querySelectorAll("#barra button")) otro.classList.toggle("activa", otro === boton);
+    for (const vista of document.querySelectorAll("main > section")) {
+      vista.classList.toggle("activa", vista.id === boton.dataset.vista);
+    }
+  };
+}
+
+// Una aguja en la pestana cuando hay algo ahi: un numero, no un punto de color.
+function pintarAgujas() {
+  $("#aguja-aprob").textContent = pendientes.length || "";
+  const malos = (datosEstado?.contenedores || []).filter((c) => ["mal", "ojo"].includes(claseSalud(c))).length;
+  $("#aguja-estado").textContent = malos || "";
+}
+
 // ---------------------------------------------------------------- arranque
 // Todo lo que la consola refresca sola. NINGUNA de estas llama al modelo: la
 // tablet esta encendida todo el dia y nadie ha pedido nada. Lo comprueba
 // app.pruebas en cada despliegue.
 const REFRESCOS = {
-  normal: [[cargarAprobaciones, 10000], [cargarEstado, 15000]],
-  ambient: [[cargarAprobaciones, 30000], [cargarEstado, 30000], [cargarAgenda, 30000], [cargarBriefings, 30000]],
+  normal: [[cargarAprobaciones, 10000], [cargarEstado, 15000], [cargarVigilancia, 20000]],
+  ambient: [[cargarAprobaciones, 30000], [cargarEstado, 30000], [cargarAgenda, 30000],
+            [cargarBriefings, 30000], [cargarVigilancia, 30000]],
 };
 let temporizadores = [];
 function programar(pares) {
@@ -942,6 +1203,7 @@ setInterval(refrescarCuentas, 1000);
 programar(REFRESCOS.normal);
 cargarAprobaciones();
 cargarEstado();
+cargarVigilancia();
 cargarBriefings();
 restaurarConversacion();
 cargarAcciones();   // la lista sale del .env: no cambia sola, se pide una vez

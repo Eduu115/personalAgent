@@ -251,6 +251,17 @@ async def ultima_vigilancia() -> Any:
             return fila["ultima"] if fila else None
 
 
+async def vigilancias_ordenadas() -> list[dict[str, Any]]:
+    """Lo que vigila el agente, lo malo primero. Solo lectura: no comprueba nada."""
+    async with pool().connection() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT nombre, estado, desde, detalle, visto_en FROM vigilancias "
+                "ORDER BY estado, desde"
+            )
+            return [dict(f) for f in await cur.fetchall()]
+
+
 async def vigilancia_guardar(
     nombre: str, estado: str, candidato: str | None, racha: int, detalle: str, cambia: bool
 ) -> None:
