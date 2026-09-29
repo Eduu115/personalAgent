@@ -40,8 +40,10 @@ cat <<FIN
 
 Voy a instalar el helper del puente. Esto es lo que va a pasar, y nada mas:
 
-  1. Crear el grupo $GRUPO si no existe. Quien este en ese grupo puede pedirle
-     al helper que actualice un stack; es todo el control de acceso que hay.
+  1. Crear el grupo $GRUPO SI NO EXISTE; si ya esta, se reutiliza con sus
+     miembros. Quien este en ese grupo puede pedirle al helper que actualice un
+     stack, y eso incluye a tu usuario cuando ejecutas el despliegue: es todo
+     el control de acceso que hay.
   2. Copiar helper/puente_helper.py a $DESTINO (root:root, 0755).
   3. Crear $CONFIG y $EQUIPOS (root:root, 0600) si no existen, con un ejemplo
      comentado. Ahi decides tu que stacks se pueden actualizar y que equipos se
@@ -62,8 +64,40 @@ FIN
 read -rp "¿Sigo? [s/N] " ok
 [ "$ok" = "s" ] || { echo "no se ha tocado nada"; exit 0; }
 
-getent group "$GRUPO" >/dev/null || { groupadd --system "$GRUPO"; echo "grupo $GRUPO creado"; }
-GID="$(getent group "$GRUPO" | cut -d: -f3)"
+# El grupo se REUTILIZA si ya existe: crearlo de nuevo se llevaria por delante a
+# sus miembros, y quien esta en ese grupo es quien puede hablar con el helper.
+# Ojo con la otra via: `groupdel puente-helper` (esta en el README, para
+# desinstalar del todo) si los borra, y despues esto crearia uno nuevo y vacio.
+# Por eso, cuando se crea, se dice bien alto.
+if getent group "$GRUPO" >/dev/null; then
+    GID="$(getent group "$GRUPO" | cut -d: -f3)"
+    miembros="$(getent group "$GRUPO" | cut -d: -f4)"
+    echo "grupo $GRUPO: ya existia (gid $GID), se reutiliza. Miembros: ${miembros:-ninguno}"
+    grupo_nuevo=0
+else
+    groupadd --system "$GRUPO"
+    GID="$(getent group "$GRUPO" | cut -d: -f3)"
+    miembros=""
+    echo "grupo $GRUPO creado (gid $GID), VACIO"
+    grupo_nuevo=1
+fi
+
+# Quien ejecuta el despliegue habla con el socket como el mismo, asi que tiene
+# que estar en el grupo. Es el fallo mas facil de tener y el mas dificil de
+# diagnosticar: el socket esta perfecto y deploy.sh dice "permission denied".
+QUIEN="${SUDO_USER:-$(logname 2>/dev/null || true)}"
+if [ -n "$QUIEN" ] && ! id -nG "$QUIEN" 2>/dev/null | tr ' ' '\n' | grep -qx "$GRUPO"; then
+    cat <<FIN
+
+  ATENCION: $QUIEN NO esta en el grupo $GRUPO, asi que ./scripts/deploy.sh no
+  podra hablar con el helper (dira "sin permiso para usar el socket"). Anadelo:
+
+      sudo usermod -aG $GRUPO $QUIEN
+
+  y CIERRA SESION Y VUELVE A ENTRAR: los grupos se leen al iniciar sesion, asi
+  que en esta misma shell seguira sin funcionar aunque lo hagas ahora.
+FIN
+fi
 
 install -d -m 0755 /usr/local/lib/puente
 install -m 0755 -o root -g root helper/puente_helper.py "$DESTINO"
@@ -153,6 +187,7 @@ systemctl is-active --quiet puente-helper.service || fallo "el servicio no ha ar
 cat <<FIN
 
 Listo. El helper escucha en /run/puente/helper.sock (root:$GRUPO, 0660).
+Miembros de $GRUPO ahora mismo: $(getent group "$GRUPO" | cut -d: -f4 | sed 's/^$/ninguno/')
 
 Lo que falta, en el .env del proyecto:
 

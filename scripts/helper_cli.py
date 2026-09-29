@@ -16,8 +16,14 @@ s.settimeout(30)
 try:
     s.connect(ruta)
 except PermissionError:
-    sys.exit(f"sin permiso para usar {ruta}: este usuario no esta en el grupo del socket "
-             f"(getent group puente-helper; el socket es root:puente-helper 0660)")
+    import getpass
+    sys.exit(
+        f"sin permiso para usar {ruta}: el socket es root:puente-helper 0660 y "
+        f"{getpass.getuser()} no esta en ese grupo. Arreglalo con:\n"
+        f"    sudo usermod -aG puente-helper {getpass.getuser()}\n"
+        f"y cierra sesion y vuelve a entrar: los grupos se leen al iniciar sesion, "
+        f"asi que en esta misma shell seguira sin funcionar."
+    )
 except FileNotFoundError:
     sys.exit(f"no existe {ruta}: el servicio no esta corriendo (systemctl status puente-helper)")
 except ConnectionRefusedError:
