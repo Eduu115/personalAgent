@@ -170,3 +170,26 @@ async def hacer_accion(accion_id: str):
         # llevaria como nombre lo que venga en la URL.
         log.warning("accion desconocida desde la consola: %r", accion_id[:80])
         return JSONResponse({"ok": False, "error": "esa acción no existe"}, status_code=404)
+
+
+# ------------------------------------------------------------------ vigilancia
+
+
+@router.get("/vigilancia")
+async def vigilancia_estado() -> dict[str, Any]:
+    """Lo que vigila el agente y como esta, tal cual esta guardado.
+
+    Es lo que le da a la consola la misma verdad que a los push: la linea de
+    arriba dice lo que la vigilancia habria avisado, asi que un silencio en la
+    pantalla y un silencio en el movil significan lo mismo. Solo LEE la tabla:
+    no comprueba nada (para eso esta POST /api/vigilancia) y no llama al modelo.
+    """
+    filas = await db.vigilancias_ordenadas()
+    return {
+        "mal": [
+            {"nombre": f["nombre"], "detalle": f["detalle"], "desde": f["desde"].isoformat()}
+            for f in filas if f["estado"] == "mal"
+        ],
+        "vigiladas": len(filas),
+        "ultima": max((f["visto_en"] for f in filas), default=None),
+    }
