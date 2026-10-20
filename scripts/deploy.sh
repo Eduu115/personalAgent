@@ -258,6 +258,25 @@ CREATE DATABASE litellm;
 SQL
 fi
 
+# ---------------------------------------------------------------- backup
+
+# Antes de migrar, siempre: si una migracion sale mal, este es el punto al que
+# volver. Y cada despliegue prueba de paso que el backup funciona, que una copia
+# que no se ha restaurado nunca no se sabe si sirve.
+log "backup"
+./scripts/backup.sh || fallo "el backup ha fallado: no se migra ni se toca nada"
+
+# El backup diario vive en el cron de dudu. Lo que no esta en git no existe, asi
+# que la linea la pone el despliegue si falta, y solo una vez.
+linea_cron="5 3 * * * cd $PWD && ./scripts/backup.sh >> $HOME/logs/puente-backup.log 2>&1"
+if ! crontab -l 2>/dev/null | grep -qF "./scripts/backup.sh >> $HOME/logs/puente-backup.log"; then
+    mkdir -p "$HOME/logs"
+    { crontab -l 2>/dev/null || true
+      echo "# puente: backup diario de las bases (lo instala scripts/deploy.sh)"
+      echo "$linea_cron"; } | crontab -
+    echo "cron del backup instalado: $linea_cron"
+fi
+
 # ---------------------------------------------------------------- migraciones
 
 # Antes de levantar el agente, nunca desde su arranque: si una migracion peta,
