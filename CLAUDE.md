@@ -305,6 +305,16 @@ ejecuta nunca. Por eso el orden es: construir, comprobar, migrar, levantar.
 que un job diario vacia el contenido de las filas de mas de 30 dias
 (`arguments`, `result`, `error`) y deja la metadata para siempre.
 
+**Backups** (`scripts/backup.sh`, desde el 21/10/2026): `pg_dump -Fc` de la base
+del agente y de la de LiteLLM a `/mnt/nas/backups/puente/`, el HDD, fuera del
+NVMe donde vive Postgres. 30 dias de retencion. Un volcado solo cuenta si
+`pg_restore --list` lo lee; si algo falla, aviso por ntfy al topic de avisos y
+salida con error. Corre a diario a las 03:05 por el cron de dudu (la linea la
+instala `deploy.sh` si falta) y **`deploy.sh` lo lanza antes de migrar**: sin
+backup no hay migracion, y cada despliegue prueba que el backup funciona. Redis y
+ntfy no se copian: son cache y mensajes ya entregados. Sigue estando en la misma
+maquina: lo que falta es la copia fuera de casa.
+
 ## Hoja de ruta
 
 - **F1 — Ojos.** Gmail por IMAP y Calendar por iCal, solo lectura, `homelab-mcp`

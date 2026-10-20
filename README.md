@@ -853,6 +853,25 @@ docker compose exec postgres psql -U puente -d puente \
   -c "select requested_at, tool_name, risk, status from tool_calls order by 1 desc limit 20;"
 ```
 
+### Backups
+
+`scripts/backup.sh` vuelca la base del agente y la de LiteLLM a
+`/mnt/nas/backups/puente/` (30 dias). Lo lanza el cron a las 03:05 (la linea la
+pone `deploy.sh`) y `deploy.sh` antes de cada migracion. Si falla, llega un aviso
+por ntfy.
+
+```bash
+./scripts/backup.sh                         # backup a mano
+ls -lt /mnt/nas/backups/puente | head       # los ultimos
+tail ~/logs/puente-backup.log               # lo que dijo el cron
+
+# restaurar la base del agente (con el agente parado)
+docker compose stop agent
+docker compose exec -T postgres pg_restore -U puente -d puente --clean --if-exists \
+  < /mnt/nas/backups/puente/puente-FECHA.dump
+docker compose up -d agent
+```
+
 ## Kill switch
 
 ```bash
