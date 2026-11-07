@@ -1,8 +1,11 @@
 """El briefing de la manana: agenda, correos que importan y el server si algo va raro.
 
 Lo lanza el planificador del agente (BRIEFING_CRON, 7:30 en Madrid por defecto)
-o POST /api/briefing a mano. Usa el mismo bucle que el chat (bucle.conversar)
-con origin="schedule": solo herramientas de lectura. Deja una conversacion
+o POST /api/briefing a mano. No usa el bucle del chat: lo que mira es siempre lo
+mismo, asi que las lecturas las hace el codigo (por herramientas.ejecutar, con
+origin="schedule": solo lectura, auditadas y en su sobre de datos) y el modelo
+barato solo redacta, en UNA llamada. Con el bucle eran 3-8 rondas de Sonnet
+reenviando todo el contexto: ~6 $/mes de los ~6 $ que gastaba el agente. Deja una conversacion
 nueva, "Briefing del ...", para seguir tirando del hilo desde el chat, y avisa
 por ntfy. Si falla, avisa tambien y con prioridad alta: es peor un briefing que
 no llega en silencio que uno que avisa de que se ha roto.
@@ -11,12 +14,13 @@ no llega en silencio que uno que avisa de que se ha roto.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from datetime import datetime, timedelta
 from typing import Any
 from apscheduler.triggers.cron import CronTrigger
 
-from . import bucle, db, herramientas, mcp_client, ntfy
+from . import db, herramientas, llm, mcp_client, ntfy
 from .config import MADRID, settings
 
 log = logging.getLogger(__name__)
@@ -31,16 +35,16 @@ _RETRASO_AVISABLE = timedelta(minutes=10)
 
 PROMPT_PLANTILLA = """Prepárame el briefing de hoy. Lo leo en el móvil recién levantado: corto, directo, sin preámbulos ni despedidas.
 
-• Agenda de hoy (cal_agenda). Hora y título de cada cosa; di si algo se solapa. Si no hay nada, una línea.
-• Correos que importan de las últimas 24 horas. Búscalos con mail_buscar usando exactamente esta consulta: {query}
-  De lo que salga, cuéntame solo lo que me pide hacer algo o que querría saber hoy: quién y de qué va, una línea cada uno. Newsletters y publicidad no cuentan. Si no hay nada, dilo.
-• Pull requests que reclamen algo (dev_prs). Son varios repos, así que el filtro es lo importante: SOLO las que piden algo de mí, o sea CI en rojo, sin tocar en más de {pr_dias} días, o con reviews pendientes. Una PR abierta ayer que va bien NO se menciona. Una línea cada una: repo, número, título corto y qué le pasa. Si alguna tiene el CI en rojo y quieres decir qué falló, dev_checks. Si ninguna reclama nada, esta sección no sale: ni "todo en orden", ni el recuento de las que hay abiertas.
+• Agenda de hoy (lo de cal_agenda). Hora y título de cada cosa; di si algo se solapa. Si no hay nada, una línea.
+• Correos que importan de las últimas 24 horas (lo de mail_buscar, consulta: {query}).
+  De ahí, cuéntame solo lo que me pide hacer algo o que querría saber hoy: quién y de qué va, una línea cada uno. Newsletters y publicidad no cuentan. Si no hay nada, dilo.
+• Pull requests que reclamen algo (lo de dev_prs). Son varios repos, así que el filtro es lo importante: SOLO las que piden algo de mí, o sea CI en rojo, sin tocar en más de {pr_dias} días, o con reviews pendientes. Una PR abierta ayer que va bien NO se menciona. Una línea cada una: repo, número, título corto y qué le pasa. Si ninguna reclama nada, esta sección no sale: ni "todo en orden", ni el recuento de las que hay abiertas.
   Ojo: "sin checks" no es "pasando". Quiere decir que ese commit no lo comprueba nadie, y en estos repos es lo normal; no lo cuentes como que el CI va bien ni como que va mal.
-• El server (lab_status, y lab_host si hace falta): solo si hay algo raro, en una línea. Un contenedor caído, unhealthy o reiniciando, o la memoria o el disco al límite. Si todo va bien, no hace falta decirlo.
+• El server (lo de lab_status y lab_host): solo si hay algo raro, en una línea. Un contenedor caído, unhealthy o reiniciando, o la memoria o el disco al límite. Si todo va bien, no hace falta decirlo.
 
 Sobre las alarmas: no tienes memoria de lo que hago yo. Un aviso de seguridad de Google, un inicio de sesión nuevo o una contraseña de aplicación recién creada casi siempre los he provocado yo, y no lo sabes. No des la alarma salvo que haya evidencia clara de que algo va mal. Si algo te parece raro, descríbelo en una línea, sin sacar conclusiones y sin dramatizar. Un briefing que grita "que viene el lobo" cada mañana se deja de leer a los tres días.
 
-Si una herramienta falla, no des esa parte por vacía: no es lo mismo "no hay correos" que "no he podido mirarlos".
+Más abajo van los resultados de esas herramientas, ya consultadas: no puedes llamar a ninguna más. Si una ha fallado, no des esa parte por vacía: no es lo mismo "no hay correos" que "no he podido mirarlos".
 
 Formato: texto plano para una notificación del móvil. Viñetas con "•", nada de encabezados, negritas ni tablas. Unas 15 líneas como mucho."""
 
@@ -140,6 +144,52 @@ async def pendiente(trigger: CronTrigger) -> datetime | None:
     return ultimo
 
 
+# Lo que lee el briefing, siempre lo mismo. dev_checks no esta: era la unica
+# lectura que dependia de lo que viera el modelo, y "CI en rojo" ya sale de dev_prs.
+_LECTURAS: list[tuple[str, dict[str, Any]]] = [
+    ("cal_agenda", {}),
+    ("mail_buscar", {}),  # la consulta se pone al llamar: sale de configuracion
+    ("dev_prs", {}),
+    ("lab_status", {}),
+    ("lab_host", {}),
+]
+
+
+async def _recoger(conversation_id: Any, no_consultado: dict[str, str]) -> str:
+    """Hace las lecturas y devuelve sus sobres de datos, uno por herramienta.
+
+    Van por herramientas.ejecutar() y no por el atajo de la consola a
+    proposito: con origin="schedule" solo pasa lo que sea `read`, y cada
+    llamada queda en tool_calls como cuando las pedia el modelo (regla 4).
+    Lo que falla se apunta en no_consultado, que es lo que va arriba.
+    """
+    sesiones = mcp_client.sesiones()
+    try:
+        catalogo = await herramientas.ofrecidas(sesiones)
+        llamadas = []
+        for i, (nombre, args) in enumerate(_LECTURAS):
+            if nombre == "mail_buscar":
+                args = {"query": settings.query_briefing}
+            llamadas.append(llm.Llamada(f"briefing-{i}", nombre, json.dumps(args), args))
+        resultados = await asyncio.gather(*(
+            herramientas.ejecutar(
+                sesiones, catalogo.ruta, ll, conversation_id=conversation_id,
+                model=settings.fast_model, origin="schedule",
+            )
+            for ll in llamadas
+        ))
+    finally:
+        await mcp_client.cerrar(sesiones)
+    # Un fallo suelto con otra lectura de la misma parte que salio bien (lab_host
+    # roto, lab_status bien) no es "no he podido consultar el server".
+    bien = {_AREA_DE_HERRAMIENTA[ll.nombre] for ll, r in zip(llamadas, resultados) if r.status == "executed"}
+    for ll, res in zip(llamadas, resultados):
+        area = _AREA_DE_HERRAMIENTA[ll.nombre]
+        if res.status != "executed" and area not in bien:
+            no_consultado.setdefault(area, f"{ll.nombre} ha fallado")
+    return "\n\n".join(r.sobre for r in resultados)
+
+
 async def lanzar(programado: datetime | None = None) -> dict[str, Any]:
     ahora = datetime.now(MADRID)
     dia = programado or ahora
@@ -185,28 +235,11 @@ async def lanzar(programado: datetime | None = None) -> dict[str, Any]:
             )
 
         conversation_id = await db.create_conversation(titulo)
-        await db.add_message(conversation_id, "user", prompt)
-        fallidas: dict[str, str] = {}
-        bien: set[str] = set()
         async with asyncio.timeout(settings.briefing_timeout):
-            async for evento, datos in bucle.conversar(
-                conversation_id, model=settings.smart_model, origin="schedule"
-            ):
-                if evento == "tool" and datos["estado"] == "fin":
-                    area = _AREA_DE_HERRAMIENTA.get(datos["nombre"])
-                    if area and datos["resultado"] == "executed":
-                        bien.add(area)
-                    elif area and datos["resultado"] == "failed":
-                        fallidas.setdefault(area, f"{datos['nombre']} ha fallado")
-                elif evento == "error":
-                    error = datos["message"]
-                elif evento == "done":
-                    respuesta = datos["respuesta"]
-        # Un fallo suelto con otra llamada de la misma parte que salio bien (un
-        # mail_leer roto entre varios) no es "no he podido consultar el correo".
-        for area, motivo in fallidas.items():
-            if area not in bien:
-                no_consultado.setdefault(area, motivo)
+            datos = await _recoger(conversation_id, no_consultado)
+            prompt += "\n\n" + datos
+            await db.add_message(conversation_id, "user", prompt)
+            respuesta = await llm.complete(prompt, model=settings.fast_model, max_tokens=1024)
 
         aviso = aviso_no_consultado(no_consultado)
         # El latido de la proactividad. Va SIEMPRE y no lo escribe el modelo:
@@ -221,7 +254,7 @@ async def lanzar(programado: datetime | None = None) -> dict[str, Any]:
                 respuesta = f"{respuesta.rstrip()}\n\n— {latido}"
             if prefijo:
                 respuesta = f"{prefijo}\n\n{respuesta}"
-            await db.reemplazar_respuesta(conversation_id, respuesta)
+            await db.add_message(conversation_id, "assistant", respuesta, model=settings.fast_model)
             if aviso and set(_AREAS) <= set(no_consultado):
                 # Nada que contar: un briefing vacio no, el aviso de fallo.
                 error = aviso

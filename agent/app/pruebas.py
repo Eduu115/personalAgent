@@ -221,6 +221,11 @@ def query_del_briefing() -> None:
             '"sin checks" no es "pasando"',       # y sin CI no se da por bueno
         ):
             assert exigencia in prompt, f"al prompt del briefing le falta: {exigencia}"
+        # Lo que lee el codigo por su cuenta tiene que ser de lectura: a las 7:30 no hay nadie.
+        from .herramientas import RIESGO
+        for nombre, _ in briefing._LECTURAS:
+            assert RIESGO.get(nombre) == "read", f"el briefing lee {nombre}, que no es de lectura"
+            assert nombre in briefing._AREA_DE_HERRAMIENTA, f"{nombre} no tiene area para el aviso"
     finally:
         settings.briefing_query = original
     print(f"OK consulta del briefing desde configuracion: {settings.query_briefing}")
