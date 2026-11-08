@@ -376,10 +376,12 @@ async def candado_de_acciones() -> None:
     async def no_llamar(*_a, **_k):
         raise AssertionError("con READ_ONLY no puede llegar a hablar con el helper")
 
-    original = (db.log_tool_call, acciones._al_helper, settings.read_only, settings.equipos_despertables)
+    original = (db.log_tool_call, acciones._al_helper, settings.read_only, settings.equipos_despertables,
+                settings.stacks_actualizables)
     db.log_tool_call = log_falso
     try:
         settings.equipos_despertables = "sobremesa, portatil"
+        settings.stacks_actualizables = ""   # solo encender: los botones de apps tienen su prueba
         assert set(acciones.catalogo()) == {"despertar:sobremesa", "despertar:portatil"}
 
         # Con el kill switch puesto no se ejecuta, pero queda en el audit log.
@@ -409,7 +411,8 @@ async def candado_de_acciones() -> None:
         assert acciones.catalogo() == {}, "sin EQUIPOS_DESPERTABLES no puede haber ninguna accion"
         print("OK acciones rapidas: catalogo cerrado, READ_ONLY las para y las dos quedan auditadas")
     finally:
-        (db.log_tool_call, acciones._al_helper, settings.read_only, settings.equipos_despertables) = original
+        (db.log_tool_call, acciones._al_helper, settings.read_only, settings.equipos_despertables,
+         settings.stacks_actualizables) = original
 
 
 def github_solo_lee() -> None:
