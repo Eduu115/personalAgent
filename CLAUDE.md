@@ -608,10 +608,14 @@ Asi que esa operacion vive fuera de Docker, en `helper/puente_helper.py`: un
 proceso del host, unidad systemd, escuchando en un socket unix. Es el primer
 componente del proyecto fuera del sandbox, y estos son sus limites:
 
-- **Dos operaciones utiles**, y las dos por CLAVE de un fichero del host (root,
+- **Tres operaciones utiles**, todas por CLAVE de un fichero del host (root,
   600, fuera del repo). Nunca una ruta, ni un comando, ni un fichero compose, ni
   una MAC:
   - `actualizar(stack)`, clave de `/etc/puente/stacks.conf` -> `pull` + `up -d`.
+  - `controlar(stack, verbo)`, misma clave -> `compose stop | start | restart`.
+    Son los botones de la tile de cada app en la consola (acciones rapidas, no
+    herramientas: el modelo no puede parar nada). Comparte con `actualizar` la
+    misma barrera (`_validar`), y `deploy.sh` prueba las exclusiones con las dos.
   - `despertar(equipo)`, clave de `/etc/puente/equipos.conf` -> paquete magico a
     la broadcast de la LAN, puerto 9. El envio no corre como root: forkea un
     hijo que suelta los grupos y hace `setgid`/`setuid` a `nobody` antes de
@@ -695,7 +699,11 @@ no cambia: van a `tool_calls` con `origin='consola'`, `READ_ONLY` las apaga y la
 lista es cerrada (`catalogo()`), de modo que un id que no este en ella da 404 y
 ni siquiera se audita, porque la fila llevaria como nombre lo que venga en la URL.
 
-**Despertar el PC NO es una herramienta MCP, y eso es la mitad del diseno.** El
+**Despertar el PC NO es una herramienta MCP, y eso es la mitad del diseno.**
+Lo mismo vale para los botones de parar/arrancar/reiniciar de cada app (una
+tile por proyecto de compose): salen de `STACKS_ACTUALIZABLES`, van al helper
+y no existen para el modelo. Actualizar NO tiene boton: baja imagenes nuevas y
+sigue por la cola con `lab_update_stack`. El
 modelo no puede encenderlo ni sabe que se puede: no esta en `RIESGO`, no la
 anuncia ningun servidor y no aparece en ningun `tools/list`. Si lo fuera,
 bastaria con que un correo le convenciera. Por eso el agente habla con el helper

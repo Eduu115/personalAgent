@@ -145,6 +145,17 @@ class Settings(BaseSettings):
     # ninguna MAC ni la va a haber. Esto NO es una herramienta del modelo.
     equipos_despertables: str = ""
 
+    # Los stacks con botones de parar/arrancar/reiniciar en la consola. La
+    # MISMA variable que lee homelab-mcp para lab_update_stack: son las claves
+    # de /etc/puente/stacks.conf, y quien manda de verdad es el helper (que
+    # ademas rechaza apiarena, puente y nextcloud aunque esten aqui). Vacio:
+    # las tiles se ven pero sin botones.
+    stacks_actualizables: str = ""
+
+    # Enlaces que la tile de una app muestra, "clave=url,clave=url". Para la
+    # app que tiene su propio panel (zomboid). Solo un enlace: no se llama.
+    enlaces_apps: str = ""
+
     # Kill switch. Con READ_ONLY=true el agente responde pero no ejecuta
     # ninguna herramienta con efectos. Lo vas a usar mas de lo que crees.
     read_only: bool = False
@@ -153,6 +164,15 @@ class Settings(BaseSettings):
     @property
     def equipos(self) -> list[str]:
         return [e.strip() for e in self.equipos_despertables.split(",") if e.strip()]
+
+    @property
+    def stacks(self) -> list[str]:
+        return [e.strip() for e in self.stacks_actualizables.split(",") if e.strip()]
+
+    @property
+    def enlaces(self) -> dict[str, str]:
+        pares = (e.split("=", 1) for e in self.enlaces_apps.split(",") if "=" in e)
+        return {k.strip(): v.strip() for k, v in pares}
 
     @property
     def query_briefing(self) -> str:

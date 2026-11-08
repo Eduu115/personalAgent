@@ -334,15 +334,24 @@ def wol_no_es_herramienta() -> None:
     culpables = [n for n in ofrecibles if any(p in n.lower() for p in prohibidas)]
     assert not culpables, f"esto no puede ser una herramienta del modelo: {culpables}"
 
-    original = settings.equipos_despertables
+    original = settings.equipos_despertables, settings.stacks_actualizables
     try:
-        settings.equipos_despertables = "sobremesa"
+        settings.equipos_despertables, settings.stacks_actualizables = "sobremesa", ""
         ids = set(acciones.catalogo())
         assert ids == {"despertar:sobremesa"}, ids
         assert not (ids & ofrecibles), "una accion rapida tambien es herramienta: elige una"
+
+        # Los botones de las tiles: parar/arrancar/reiniciar y nada mas. Actualizar
+        # baja imagenes nuevas y va por la cola (lab_update_stack), no por un boton.
+        settings.equipos_despertables, settings.stacks_actualizables = "", "zomboid"
+        ids = set(acciones.catalogo())
+        assert ids == {"parar:zomboid", "arrancar:zomboid", "reiniciar:zomboid"}, ids
+        assert not (ids & ofrecibles), "un boton de app tambien es herramienta: elige una"
+        assert not [n for n in ofrecibles if n.startswith(("parar", "arrancar", "lab_parar", "lab_arrancar"))], \
+            "parar o arrancar un stack no puede ser una herramienta del modelo"
     finally:
-        settings.equipos_despertables = original
-    print(f"OK encender no es herramienta: {len(ofrecibles)} ofrecibles y ninguna despierta nada")
+        settings.equipos_despertables, settings.stacks_actualizables = original
+    print(f"OK encender y los botones de las apps no son herramientas ({len(ofrecibles)} ofrecibles)")
 
 
 async def candado_de_acciones() -> None:

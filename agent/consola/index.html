@@ -213,6 +213,9 @@ button.pestana.activa { color: var(--tinta); background: var(--hueco); border-co
 /* El estado va escrito, no solo en el color del borde. Antes el detalle vivia
    en un title=, que con el dedo no se ve y un lector de pantalla no lee. */
 .tile .e { font-size: var(--t-xs); color: var(--tenue); }
+.tile .botones { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.tile .botones button, .tile .botones a { min-height: 44px; padding: 0 12px; font-size: var(--t-xs); border-radius: 8px; border: 1px solid var(--pelo); background: var(--hueco); color: var(--tinta); text-decoration: none; display: inline-flex; align-items: center; }
+.tile .botones button.peligro { border-color: var(--mal); }
 .grupo {
   display: flex; justify-content: space-between; align-items: baseline; margin: 14px 0 6px;
   font-size: var(--t-xs); text-transform: uppercase; letter-spacing: .07em; color: var(--tenue); font-weight: 600;
@@ -569,6 +572,62 @@ function claseSalud(c) {
   return "";
 }
 
+// Lo que se ve de una app y sus botones. Los botones salen del catalogo de
+// /api/acciones: si el stack no esta en STACKS_ACTUALIZABLES, o el helper lo
+// excluye (apiarena, puente, nextcloud), no hay botones y no se pueden inventar.
+function tileDeApp(app, grupo) {
+  const clase = grupo.map(claseSalud).sort((a, b) => ({ mal: 0, ojo: 1, "": 2, ok: 3, off: 4 }[a] - { mal: 0, ojo: 1, "": 2, ok: 3, off: 4 }[b]))[0];
+  const t = crear("div", "tile app " + clase);
+  const enMarcha = grupo.filter((c) => c.estado === "running").length;
+  const rotos = grupo.filter((c) => ["mal", "ojo"].includes(claseSalud(c))).map((c) => c.nombre);
+  const detalle = rotos.length ? `${rotos.join(", ")} no está bien`
+    : enMarcha === 0 ? "parada" : `${enMarcha}/${grupo.length} en marcha`;
+  t.append(crear("div", "n", app), crear("div", "e", detalle));
+  const botones = crear("div", "botones");
+  for (const verbo of ["arrancar", "reiniciar", "parar"]) {
+    const accion = lasAcciones.find((a) => a.id === `${verbo}:${app}`);
+    if (!accion) continue;
+    if (verbo === "arrancar" && enMarcha === grupo.length) continue;
+    if (verbo !== "arrancar" && enMarcha === 0) continue;
+    const b = crear("button", verbo === "arrancar" ? "" : "peligro", accion.etiqueta.split(" ")[0]);
+    b.disabled = soloLectura;
+    b.onclick = () => botonDeApp(accion, b, verbo !== "arrancar");
+    botones.append(b);
+  }
+  const enlace = losEnlaces[app];
+  if (enlace) {
+    const a = crear("a", "enlace", "Abrir panel");
+    a.href = enlace; a.target = "_blank"; a.rel = "noopener";
+    botones.append(a);
+  }
+  if (botones.childElementCount) t.append(botones);
+  return t;
+}
+
+// Parar y reiniciar piden un segundo toque: en una tablet de pared un roce no
+// puede tirar un servidor. Arrancar no: lo peor que hace es arrancar.
+async function botonDeApp(accion, b, confirmar) {
+  const texto = b.textContent;
+  if (confirmar && !b.dataset.armado) {
+    b.dataset.armado = "1";
+    b.textContent = "¿Seguro? Toca otra vez";
+    setTimeout(() => { delete b.dataset.armado; if (!b.disabled) b.textContent = texto; }, 4000);
+    return;
+  }
+  delete b.dataset.armado;
+  b.disabled = true;
+  b.textContent = "…";
+  let d;
+  try {
+    const r = await fetch("/api/acciones/" + encodeURIComponent(accion.id), { method: "POST" });
+    d = await r.json();
+  } catch (e) {
+    d = { ok: false, error: String(e) };
+  }
+  b.textContent = d.ok ? `Hecho · ${hora(new Date())}` : `Falló: ${(d.error || d.aviso || "?").slice(0, 80)}`;
+  setTimeout(() => cargarEstado(), 1500);
+}
+
 function barra(caja, titulo, usado, total, unidad, pct) {
   const etiqueta = crear("div", "etiqueta");
   etiqueta.append(crear("span", null, titulo), crear("b", null, `${usado} / ${total} ${unidad} · ${pct}%`));
@@ -646,34 +705,24 @@ async function cargarEstado() {
   caja.replaceChildren();
   $("#n-cont").textContent = `${datos.docker.en_marcha}/${datos.docker.contenedores}`;
 
-  // Primero lo que no esta bien, y los del asistente aparte: son los unicos
-  // sobre los que puede actuar. Veinte contenedores sanos de APIArena no pueden
-  // enterrar al que esta reiniciandose.
+  // Una tile por app (proyecto de compose), no por contenedor: veinte tiles
+  // sanas de APIArena no pueden enterrar a la que esta mal. Lo roto, arriba.
   const orden = { mal: 0, ojo: 1, "": 2, ok: 3, off: 4 };
-  const gravedad = (a, b) => orden[claseSalud(a)] - orden[claseSalud(b)] || a.nombre.localeCompare(b.nombre);
-  const problemas = (grupo) => grupo.filter((c) => ["mal", "ojo"].includes(claseSalud(c))).length;
-  const mios = datos.contenedores.filter((c) => c.nombre.startsWith("puente-")).sort(gravedad);
-  const resto = datos.contenedores.filter((c) => !c.nombre.startsWith("puente-")).sort(gravedad);
-  const grupos = [["Del asistente", mios], ["Lo demás", resto]];
-  if (problemas(resto) && !problemas(mios)) grupos.reverse();   // lo roto, arriba
-
-  for (const [titulo, grupo] of grupos) {
-    if (!grupo.length) continue;
-    const malos = problemas(grupo);
-    const cabecera = crear("div", "grupo");
-    cabecera.append(crear("span", null, titulo),
-                    crear("span", malos ? "malos" : "", malos ? `${malos} con problemas` : `${grupo.length} bien`));
-    const tiles = crear("div", "tiles");
-    for (const c of grupo.slice(0, 60)) {
-      const t = crear("div", "tile " + claseSalud(c));
-      // El detalle va escrito. Antes vivia en un title=, que con el dedo no se
-      // abre nunca y un lector de pantalla no lo lee.
-      t.append(crear("div", "n", c.nombre), crear("div", "e", c.detalle || c.salud || c.estado));
-      tiles.append(t);
-    }
-    caja.append(cabecera, tiles);
-    if (grupo.length > 60) caja.append(crear("div", "vacio", `y ${grupo.length - 60} más`));
+  const apps = new Map();
+  for (const c of datos.contenedores) {
+    const app = c.proyecto || c.nombre;
+    if (!apps.has(app)) apps.set(app, []);
+    apps.get(app).push(c);
   }
+  const peor = (grupo) => grupo.map(claseSalud).sort((a, b) => orden[a] - orden[b])[0];
+  const lista = [...apps].sort(([a, ga], [b, gb]) => orden[peor(ga)] - orden[peor(gb)] || a.localeCompare(b));
+  const malas = lista.filter(([, g]) => ["mal", "ojo"].includes(peor(g))).length;
+  const cabecera = crear("div", "grupo");
+  cabecera.append(crear("span", null, "Aplicaciones"),
+                  crear("span", malas ? "malos" : "", malas ? `${malas} con problemas` : `${lista.length} apps`));
+  const tiles = crear("div", "tiles");
+  for (const [app, grupo] of lista) tiles.append(tileDeApp(app, grupo));
+  caja.append(cabecera, tiles);
 
   const medidas = crear("div", "medidas");
   const m = datos.host.memoria;
@@ -1058,18 +1107,20 @@ function pintarAmbient() {
 // ---------------------------------------------------------------- acciones
 // Se ejecutan al pulsar, sin pasar por la cola: el boton ES la aprobacion (el
 // porque, en agent/app/acciones.py). Nada de esto se refresca solo.
-let lasAcciones = [], soloLectura = false;
+let lasAcciones = [], soloLectura = false, losEnlaces = {};
 
 async function cargarAcciones() {
   try {
     const r = await fetch("/api/acciones");
     const d = await r.json();
     lasAcciones = d.acciones || [];
+    losEnlaces = d.enlaces || {};
     soloLectura = !!d.read_only;
   } catch (e) {
     lasAcciones = [];
   }
   pintarAcciones();
+  cargarEstado();   // las tiles llevan los botones de su app: repintar con ellos
 }
 
 function caraDelBoton(boton, accion, texto, clase) {
@@ -1080,12 +1131,14 @@ function caraDelBoton(boton, accion, texto, clase) {
 function pintarAcciones() {
   const caja = $("#acciones");
   caja.replaceChildren();
-  if (!lasAcciones.length) {
+  // Aqui solo encender equipos: los botones de cada app van en su tile.
+  const equipos = lasAcciones.filter((a) => a.id.startsWith("despertar:"));
+  if (!equipos.length) {
     caja.append(crear("p", "vacio", "No hay ninguna acción configurada. Se activan con EQUIPOS_DESPERTABLES en el .env del server."));
     return;
   }
   const rejilla = crear("div", "rejilla");
-  for (const accion of lasAcciones) {
+  for (const accion of equipos) {
     const boton = crear("button");
     caraDelBoton(boton, accion, soloLectura ? "Modo solo lectura: desactivada" : accion.detalle);
     boton.disabled = soloLectura;
