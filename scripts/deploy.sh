@@ -473,23 +473,27 @@ print("; ".join(f"{nombre} -> {motivo}" for nombre, motivo in sorted(mal.items()
     prueba_pid=$!
     sleep 1
     malas=""
-    for excluido in apiarena puente nextcloud; do
-        veredicto="$(preguntar_helper "$sock_prueba" "{\"op\":\"actualizar\",\"stack\":\"$excluido\"}" || true)"
+    # Lo mismo para actualizar que para los botones de parar/arrancar/reiniciar:
+    # comparten barrera (_validar), y esto es lo que se entera si dejan de hacerlo.
+    for peticion in '"op":"actualizar"' '"op":"controlar","verbo":"parar"' '"op":"controlar","verbo":"reiniciar"'; do
+        for excluido in apiarena puente nextcloud; do
+            veredicto="$(preguntar_helper "$sock_prueba" "{$peticion,\"stack\":\"$excluido\"}" || true)"
+            case "$veredicto" in
+                *'"ok": false'*) echo "helper: '$excluido' rechazado ($peticion) aunque este en su configuracion" ;;
+                *) malas="$malas $excluido($peticion)" ;;
+            esac
+        done
+        # Aqui no vale un "ok": false cualquiera: tiene que rechazarlo por el
+        # servicio que define, no porque el compose no se pudiera leer.
+        veredicto="$(preguntar_helper "$sock_prueba" "{$peticion,\"stack\":\"disfrazado\"}" || true)"
         case "$veredicto" in
-            *'"ok": false'*) echo "helper: '$excluido' rechazado aunque este en su configuracion" ;;
-            *) malas="$malas $excluido" ;;
+            *'"ok": false'*define*nextcloud*) echo "helper: un compose que define nextcloud, rechazado ($peticion)" ;;
+            *) malas="$malas un-compose-con-nextcloud-dentro($peticion: $veredicto)" ;;
         esac
     done
-    # Aqui no vale un "ok": false cualquiera: tiene que rechazarlo por el
-    # servicio que define, no porque el compose no se pudiera leer.
-    veredicto="$(preguntar_helper "$sock_prueba" '{"op":"actualizar","stack":"disfrazado"}' || true)"
-    case "$veredicto" in
-        *'"ok": false'*define*nextcloud*) echo "helper: un compose que define nextcloud, rechazado" ;;
-        *) malas="$malas un-compose-con-nextcloud-dentro($veredicto)" ;;
-    esac
     kill "$prueba_pid" 2>/dev/null || true
     rm -rf "$conf_prueba" "$sock_prueba" "$dir_prueba"
-    [ -z "$malas" ] || fallo "EL HELPER ACTUALIZARIA:$malas"
+    [ -z "$malas" ] || fallo "EL HELPER TOCARIA:$malas"
 
     # Que el socket se vea desde fuera no dice que se vea desde DENTRO, que es
     # lo que importa. Primero un stat y luego el connect, porque no es lo mismo

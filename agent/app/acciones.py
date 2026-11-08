@@ -12,8 +12,13 @@ Lo que si mantienen, porque eso no depende de quien lo pida:
   - `READ_ONLY` las apaga;
   - la lista es fija y cerrada: lo que no este en el catalogo no existe.
 
+Hay dos familias: encender un equipo (`despertar:<equipo>`) y los botones de la
+tile de cada app (`parar|arrancar|reiniciar:<stack>`). Actualizar NO esta aqui:
+baja imagenes nuevas, que es lo unico que puede romper algo, y sigue por la
+cola con lab_update_stack.
+
 Y lo que NO hay detras: ninguna herramienta MCP. **El modelo no puede encender
-el PC, ni sabe que se puede.** Por eso `despertar` vive en el helper del host y
+el PC ni parar un stack, ni sabe que se puede.** Por eso `despertar` vive en el helper del host y
 se le pide desde aqui por su socket, sin pasar por homelab-mcp: si fuera una
 herramienta, estaria en el catalogo que ve el modelo y bastaria con que un
 correo le convenciera. `pruebas.wol_no_es_herramienta()` lo comprueba.
@@ -40,6 +45,10 @@ log = logging.getLogger(__name__)
 SOCKET = os.environ.get("HELPER_SOCKET", "/run/puente/helper.sock")
 # Mandar tres paquetes UDP es instantaneo: si no contesta en esto, no contesta.
 TOPE = 15.0
+# compose start/restart y esperar a los healthchecks: el helper espera hasta 90 s
+# a que esten sanos, mas lo que tarde compose.
+TOPE_STACK = 240.0
+VERBOS = {"parar": "Parar", "arrancar": "Arrancar", "reiniciar": "Reiniciar"}
 
 
 @dataclass(frozen=True)
@@ -51,7 +60,7 @@ class Accion:
     correr: Callable[[], Awaitable[dict[str, Any]]]
 
 
-async def _al_helper(op: str, **extra: Any) -> dict[str, Any]:
+async def _al_helper(op: str, tope: float = TOPE, **extra: Any) -> dict[str, Any]:
     """Una peticion JSON por linea al helper del host. Sin reintentos."""
     try:
         lector, escritor = await asyncio.wait_for(asyncio.open_unix_connection(SOCKET), 5)
@@ -63,7 +72,7 @@ async def _al_helper(op: str, **extra: Any) -> dict[str, Any]:
     try:
         escritor.write(json.dumps({"op": op, **extra}).encode() + b"\n")
         await escritor.drain()
-        linea = await asyncio.wait_for(lector.readline(), TOPE)
+        linea = await asyncio.wait_for(lector.readline(), tope)
     finally:
         escritor.close()
     if not linea:
@@ -76,14 +85,30 @@ async def _despertar(equipo: str) -> dict[str, Any]:
     return await _al_helper("despertar", equipo=equipo)
 
 
-def catalogo() -> dict[str, Accion]:
-    """La lista fija de acciones. Hoy solo encender equipos.
+async def _controlar(stack: str, verbo: str) -> dict[str, Any]:
+    return await _al_helper("controlar", tope=TOPE_STACK, stack=stack, verbo=verbo)
 
-    Sale de EQUIPOS_DESPERTABLES: sin esa variable no hay ninguna accion y la
-    vista de la consola lo dice. Quien manda de verdad es el fichero del host,
-    que este contenedor no ve.
+
+def catalogo() -> dict[str, Accion]:
+    """La lista fija de acciones.
+
+    Sale de EQUIPOS_DESPERTABLES y STACKS_ACTUALIZABLES: sin ellas no hay
+    ninguna accion y la consola lo dice. Quien manda de verdad son los ficheros
+    del host, que este contenedor no ve, y las exclusiones del helper.
     """
-    return {
+    stacks = {
+        f"{verbo}:{stack}": Accion(
+            id=f"{verbo}:{stack}",
+            etiqueta=f"{etiqueta} {stack}",
+            detalle=("compose stop: los contenedores se quedan, Arrancar los devuelve tal cual."
+                     if verbo == "parar" else "Espera a que los healthchecks pasen a sanos."),
+            riesgo="write",
+            correr=partial(_controlar, stack, verbo),
+        )
+        for stack in settings.stacks
+        for verbo, etiqueta in VERBOS.items()
+    }
+    return stacks | {
         f"despertar:{equipo}": Accion(
             id=f"despertar:{equipo}",
             etiqueta=f"Encender {equipo}",

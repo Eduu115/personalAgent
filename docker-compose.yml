@@ -156,6 +156,10 @@ services:
       # Vacio: no hay acciones rapidas. Los nombres son claves de
       # /etc/puente/equipos.conf del host; las MAC no entran aqui.
       EQUIPOS_DESPERTABLES: ${EQUIPOS_DESPERTABLES:-}
+      # Los stacks con botones en su tile (parar/arrancar/reiniciar). La misma
+      # lista que lab_update_stack; vacia: tiles sin botones.
+      STACKS_ACTUALIZABLES: ${STACKS_ACTUALIZABLES:-}
+      ENLACES_APPS: ${ENLACES_APPS:-}
     volumes:
       # El DIRECTORIO del helper, por lo mismo que en homelab-mcp: el socket se
       # resuelve al conectar y no al arrancar. El agente lo necesita para el

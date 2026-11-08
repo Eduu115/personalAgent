@@ -6,11 +6,12 @@ socket de Docker, que es equivalente a root. Por eso es pequeno, sin
 dependencias y se lee de una sentada. Si crece, algo se ha hecho mal.
 
 Habla JSON por lineas en un socket unix. No hay puerto ni token: el permiso es
-el dueno y el modo del socket. Dos operaciones utiles y las dos van por CLAVE de
-un fichero del host (root, 600, fuera del repo), nunca por parametro libre:
+el dueno y el modo del socket. Todo va por CLAVE de un fichero del host (root,
+600, fuera del repo), nunca por parametro libre:
 
-  actualizar(stack)   clave de /etc/puente/stacks.conf  -> compose pull + up -d
-  despertar(equipo)   clave de /etc/puente/equipos.conf -> paquete magico a la LAN
+  actualizar(stack)             clave de stacks.conf  -> compose pull + up -d
+  controlar(stack, verbo)       clave de stacks.conf  -> compose stop | start | restart
+  despertar(equipo)             clave de equipos.conf -> paquete magico a la LAN
 
 Nunca una ruta, ni un comando, ni un fichero compose, ni una MAC suelta.
 """
@@ -162,33 +163,53 @@ def _sanos(estado: dict[str, str]) -> bool:
     return all(v in ("healthy", "running") for v in estado.values()) and bool(estado)
 
 
-def actualizar(stack: str) -> dict:
+def _validar(stack: str) -> tuple[str | None, dict | None]:
+    """(ruta, None) si se puede tocar ese stack; (None, error) si no.
+
+    La misma barrera para actualizar y para parar/arrancar/reiniciar: los
+    excluidos se miran en la clave, en el directorio al que apunta y en los
+    servicios que define su compose.
+    """
     if stack in EXCLUIDOS:
         log.warning("rechazado: '%s' esta excluido en el codigo", stack)
-        return {"ok": False, "error": f"'{stack}' no se actualiza desde aqui nunca"}
+        return None, {"ok": False, "error": f"'{stack}' no se toca desde aqui nunca"}
     configurados = mapa(CONFIG)
     ruta = configurados.get(stack)
     if ruta is None:
         log.warning("rechazado: '%s' no esta en %s", stack, CONFIG)
-        return {"ok": False, "error": f"'{stack}' no esta configurado. Hay: {', '.join(sorted(configurados)) or 'ninguno'}"}
+        return None, {"ok": False, "error": f"'{stack}' no esta configurado. Hay: {', '.join(sorted(configurados)) or 'ninguno'}"}
     if (mal := problema(ruta)) is not None:
         log.warning("rechazado: '%s' mal configurado: %s", stack, mal)
-        return {"ok": False, "error": f"'{stack}' esta mal configurado en {CONFIG}: {mal}"}
+        return None, {"ok": False, "error": f"'{stack}' esta mal configurado en {CONFIG}: {mal}"}
     if os.path.basename(os.path.realpath(ruta)) in EXCLUIDOS:
         log.warning("rechazado: '%s' apunta a un directorio excluido", stack)
-        return {"ok": False, "error": f"'{stack}' apunta a un stack excluido"}
+        return None, {"ok": False, "error": f"'{stack}' apunta a un stack excluido"}
     # Y el contenido: una clave inocente puede apuntar a un compose que levante
-    # nextcloud. Si el compose no se puede leer tampoco se sigue: sin saber que
-    # hay dentro no se actualiza (el pull fallaria igual, pero mas tarde).
+    # nextcloud. Si el compose no se puede leer tampoco se sigue.
     try:
         prohibidos = sorted(servicios(ruta) & EXCLUIDOS)
     except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
         log.warning("rechazado: '%s': %s", stack, exc)
-        return {"ok": False, "error": str(exc)}
+        return None, {"ok": False, "error": str(exc)}
     if prohibidos:
         log.warning("rechazado: el compose de '%s' define %s", stack, ", ".join(prohibidos))
-        return {"ok": False,
-                "error": f"el compose de '{stack}' define {', '.join(prohibidos)}, que esta excluido"}
+        return None, {"ok": False,
+                      "error": f"el compose de '{stack}' define {', '.join(prohibidos)}, que esta excluido"}
+    return ruta, None
+
+
+def _esperar_sanos(ruta: str, empezo: float) -> dict[str, str]:
+    estado = salud(ruta)
+    while not _sanos(estado) and time.monotonic() - empezo < ESPERA_SALUD:
+        time.sleep(3)
+        estado = salud(ruta)
+    return estado
+
+
+def actualizar(stack: str) -> dict:
+    ruta, error = _validar(stack)
+    if error:
+        return error
 
     empezo = time.monotonic()
     anteriores = digests(ruta)
@@ -202,11 +223,7 @@ def actualizar(stack: str) -> dict:
             return {"ok": False, "error": f"compose {args[0]} fallo: {r.stderr[-300:].strip()}",
                     "digests_anteriores": anteriores, "estado": salud(ruta)}
 
-    estado = salud(ruta)
-    while not _sanos(estado) and time.monotonic() - empezo < ESPERA_SALUD:
-        time.sleep(3)
-        estado = salud(ruta)
-
+    estado = _esperar_sanos(ruta, empezo)
     ok = _sanos(estado)
     log.info("'%s' %s en %.0f s: %s", stack, "listo" if ok else "con problemas", time.monotonic() - empezo, estado)
     return {
@@ -217,6 +234,31 @@ def actualizar(stack: str) -> dict:
         "segundos": round(time.monotonic() - empezo),
         "aviso": None if ok else f"Hay contenedores que no estan sanos tras {ESPERA_SALUD} s.",
     }
+
+
+# Los botones de la consola. Nunca down ni rm: stop deja los contenedores
+# donde estan, y start los devuelve tal cual.
+VERBOS = {"parar": "stop", "arrancar": "start", "reiniciar": "restart"}
+
+
+def controlar(stack: str, verbo: str) -> dict:
+    if verbo not in VERBOS:
+        return {"ok": False, "error": f"verbo desconocido: {verbo!r}"}
+    ruta, error = _validar(stack)
+    if error:
+        return error
+    empezo = time.monotonic()
+    log.info("%s '%s' (%s)", verbo, stack, ruta)
+    r = compose(ruta, VERBOS[verbo], tope=TOPE_UP)
+    if r.returncode != 0:
+        log.error("'%s' fallo en %s: %s", stack, verbo, r.stderr[-300:])
+        return {"ok": False, "error": f"compose {VERBOS[verbo]} fallo: {r.stderr[-300:].strip()}",
+                "estado": salud(ruta)}
+    estado = salud(ruta) if verbo == "parar" else _esperar_sanos(ruta, empezo)
+    ok = verbo == "parar" or _sanos(estado)
+    log.info("'%s' %s: %s", stack, verbo, estado)
+    return {"ok": ok, "stack": stack, "estado": estado, "segundos": round(time.monotonic() - empezo),
+            "aviso": None if ok else f"Hay contenedores que no estan sanos tras {ESPERA_SALUD} s."}
 
 
 # ------------------------------------------------------------------ despertar
@@ -311,6 +353,8 @@ class Handler(socketserver.StreamRequestHandler):
                              "equipos": sorted(mapa(EQUIPOS))}
             elif op == "actualizar":
                 respuesta = actualizar(str(peticion.get("stack", "")))
+            elif op == "controlar":
+                respuesta = controlar(str(peticion.get("stack", "")), str(peticion.get("verbo", "")))
             elif op == "despertar":
                 respuesta = despertar(str(peticion.get("equipo", "")))
             else:

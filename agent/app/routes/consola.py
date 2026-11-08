@@ -153,6 +153,7 @@ async def acciones_disponibles() -> dict[str, Any]:
     """Lo que los botones de la consola pueden hacer. Fijo y corto."""
     return {
         "read_only": settings.read_only,
+        "enlaces": settings.enlaces,
         "acciones": [
             {"id": a.id, "etiqueta": a.etiqueta, "detalle": a.detalle, "riesgo": a.riesgo}
             for a in acciones.catalogo().values()
